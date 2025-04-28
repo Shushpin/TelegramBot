@@ -56,7 +56,7 @@ public class TelegramBot extends TelegramLongPollingBot {
 
             log.debug("Received message from chat_id={}: {}", chatId, messageText);
 
-            // Тут можна додати просту відповідь для перевірки
+            // Тут можна додати просту відповідь для перевірки, пізніше не знадобиться (ЗАБРАТИ)
             SendMessage response = new SendMessage();
             response.setChatId(chatId);
             response.setText("Я отримав твоє повідомлення: " + messageText);
