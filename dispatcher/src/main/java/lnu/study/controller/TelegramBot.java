@@ -7,7 +7,7 @@ import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
-import org.telegram.telegrambots.starter.SpringWebhookBot; // Якщо використовуєш Webhook
+import org.telegram.telegrambots.starter.SpringWebhookBot; // для Webhook напровсяк
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
@@ -20,12 +20,11 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     private static final Logger log = LogManager.getLogger(TelegramBot.class);
 
-    // Використовуй конструктор для ін'єкції залежностей, якщо це зручно
     private final String botName;
     private final String botToken;
     private final TelegramBotsApi telegramBotsApi; // Для реєстрації
 
-    @Autowired // Або використовуй ін'єкцію через конструктор
+    @Autowired
     public TelegramBot(@Value("${bot.name}") String botName,
                        @Value("${bot.token}") String botToken) throws TelegramApiException {
         super(botToken); // Передаємо токен в конструктор суперкласу
