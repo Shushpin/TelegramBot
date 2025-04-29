@@ -22,14 +22,22 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     private final String botName;
     private final String botToken;
-    private final TelegramBotsApi telegramBotsApi; // Для реєстрації
+    private final TelegramBotsApi telegramBotsApi;// Для реєстрації
+    private UpdateController updateController;
+
+
+    @PostConstruct
+    public void init(){
+        updateController.registerBot(this);
+    }
 
     @Autowired
     public TelegramBot(@Value("${bot.name}") String botName,
-                       @Value("${bot.token}") String botToken) throws TelegramApiException {
+                       @Value("${bot.token}") String botToken, UpdateController updateController) throws TelegramApiException {
         super(botToken); // Передаємо токен в конструктор суперкласу
         this.botName = botName;
         this.botToken = botToken; // Можна і не зберігати, якщо використовується тільки в getBotToken()
+        this.updateController = updateController;
         this.telegramBotsApi = new TelegramBotsApi(DefaultBotSession.class);
         try {
             this.telegramBotsApi.registerBot(this);
@@ -72,4 +80,6 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
     }
 
+    public void sendAnswerMessage(SendMessage sendMessage) {
+    }
 }
