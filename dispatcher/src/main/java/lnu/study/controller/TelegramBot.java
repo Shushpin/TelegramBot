@@ -56,6 +56,7 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     @Override
     public void onUpdateReceived(Update update) {
+        updateController.processUpdate(update);
         // Перевіряємо, чи є повідомлення і чи є в ньому текст
         if (update.hasMessage() && update.getMessage().hasText()) {
             var message = update.getMessage();
