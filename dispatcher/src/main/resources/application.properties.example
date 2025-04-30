@@ -6,5 +6,5 @@ bot.token={YOUR_TOKEN_HERE}
 
 spring.rabbitmq.host=localhost
 spring.rabbitmq.port=5672
-spring.rabbitmq.username={RABBIT_USER_NAME}
+spring.rabbitmq.username={RABBITMQ_USER_NAME}
 spring.rabbitmq.password={YOUR_PASS}
