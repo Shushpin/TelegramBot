@@ -4,6 +4,9 @@ target/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
+# Configuration files
+dispatcher/src/main/resources/application.properties
+
 # Ignore log files
 logs/
 *.log

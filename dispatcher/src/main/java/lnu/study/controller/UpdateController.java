@@ -83,40 +83,19 @@ public class UpdateController {
     private void setView(SendMessage sendMessage) {
         telegramBot.sendAnswerMessage(sendMessage);
     }
-// В класі lnu.study.controller.UpdateController
 
     private void processPhotoMessage(Update update) {
-        // Додаємо лог, щоб бачити, що ми тут
-        log.debug("Processing photo message, update_id={}", update.getUpdateId());
         updateProducer.produce(PHOTO_MESSAGE_UPDATE, update);
-        setFileIsReceivedView(update); // Цей метод вже надсилає відповідь ботом
+        setFileIsReceivedView(update);
     }
 
     private void processDocMessage(Update update) {
-        // Додаємо лог, щоб бачити, що ми тут
-        log.debug("Processing document message, update_id={}", update.getUpdateId());
         updateProducer.produce(DOC_MESSAGE_UPDATE, update);
-        setFileIsReceivedView(update); // Цей метод вже надсилає відповідь ботом
+        setFileIsReceivedView(update);
     }
 
     private void processTextMessage(Update update) {
-        // Можна і сюди додати для консистенції
-        log.debug("Processing text message, update_id={}", update.getUpdateId());
         updateProducer.produce(TEXT_MESSAGE_UPDATE, update);
-        // Для текстових повідомлень відповідь не надсилаємо (згідно з поточним кодом)
     }
-//    private void processPhotoMessage(Update update) {
-//        updateProducer.produce(PHOTO_MESSAGE_UPDATE, update);
-//        setFileIsReceivedView(update);
-//    }
-//
-//    private void processDocMessage(Update update) {
-//        updateProducer.produce(DOC_MESSAGE_UPDATE, update);
-//        setFileIsReceivedView(update);
-//    }
-//
-//    private void processTextMessage(Update update) {
-//        updateProducer.produce(TEXT_MESSAGE_UPDATE, update);
-//    }
 
 }
