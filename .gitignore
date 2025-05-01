@@ -6,6 +6,7 @@ target/
 
 # Configuration files
 dispatcher/src/main/resources/application.properties
+node/src/main/resources/application.properties
 
 # Ignore log files
 logs/
