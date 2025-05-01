@@ -1,0 +1,10 @@
+server.port=8084
+
+bot.name={NAME_YOU_NEED_TO_ADD}
+bot.token={YOUR_TOKEN_HERE}
+
+
+spring.rabbitmq.host=localhost
+spring.rabbitmq.port=5672
+spring.rabbitmq.username={RABBITMQ_USER_NAME}
+spring.rabbitmq.password={YOUR_PASS}

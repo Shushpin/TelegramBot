@@ -55,19 +55,6 @@ public class UpdateController {
         }
     }
 
-//    private void distributeMessagesByType(Update update) {
-//        var message = update.getMessage();
-//        if(message != null) {
-//            processTextMessage(update);
-//        }else if(message.getDocument() != null) {
-//            processDocMessage(update);
-//        }else if(message.getPhoto() != null) {
-//            processPhotoMessage(update);
-//        }else{
-//            setUnsupportedMessageTypeView(update);
-//        }
-//    }
-
     private void setUnsupportedMessageTypeView(Update update) {
         var sendMessage = messageUtils.generateSendMessageWithText(update,
                 "Unsupported message type!");
@@ -80,7 +67,7 @@ public class UpdateController {
         setView(sendMessage);
     }
 
-    private void setView(SendMessage sendMessage) {
+    public void setView(SendMessage sendMessage) {
         telegramBot.sendAnswerMessage(sendMessage);
     }
 

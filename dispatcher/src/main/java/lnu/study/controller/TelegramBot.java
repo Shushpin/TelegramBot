@@ -1,13 +1,12 @@
 package lnu.study.controller;
 
-import jakarta.annotation.PostConstruct; // Важливо для Spring Boot 3+
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
-import org.telegram.telegrambots.starter.SpringWebhookBot; // для Webhook напровсяк
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
@@ -21,33 +20,31 @@ public class TelegramBot extends TelegramLongPollingBot {
     private static final Logger log = LogManager.getLogger(TelegramBot.class);
 
     private final String botName;
-    private final String botToken;
-    private final TelegramBotsApi telegramBotsApi;// Для реєстрації
-    private UpdateController updateController;
-
+    private final TelegramBotsApi telegramBotsApi;
+    private final UpdateController updateController; // Зробимо final
 
     @PostConstruct
     public void init(){
         updateController.registerBot(this);
+        log.info("TelegramBot instance registered in UpdateController.");
     }
 
     @Autowired
     public TelegramBot(@Value("${bot.name}") String botName,
-                       @Value("${bot.token}") String botToken, UpdateController updateController) throws TelegramApiException {
-        super(botToken); // Передаємо токен в конструктор суперкласу
+                       @Value("${bot.token}") String botToken,
+                       UpdateController updateController) throws TelegramApiException {
+        super(botToken);
         this.botName = botName;
-        this.botToken = botToken; // Можна і не зберігати, якщо використовується тільки в getBotToken()
-        this.updateController = updateController;
+        this.updateController = updateController; // Ініціалізуємо final поле
         this.telegramBotsApi = new TelegramBotsApi(DefaultBotSession.class);
         try {
             this.telegramBotsApi.registerBot(this);
             log.info("Telegram bot {} registered successfully!", botName);
         } catch (TelegramApiException e) {
             log.error("Error registering bot {}: {}", botName, e.getMessage());
-            throw e; // Прокидуємо помилку далі, щоб Spring знав про проблему
+            throw e;
         }
     }
-
 
     @Override
     public String getBotUsername() {
@@ -56,32 +53,31 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     @Override
     public void onUpdateReceived(Update update) {
-        updateController.processUpdate(update);
-        // Перевіряємо, чи є повідомлення і чи є в ньому текст
-        if (update.hasMessage() && update.getMessage().hasText()) {
-            var message = update.getMessage();
-            var chatId = message.getChatId().toString(); // Отримуємо ID чату для відповіді
-            var messageText = message.getText();
-
-            log.debug("Received message from chat_id={}: {}", chatId, messageText);
-
-            // Тут можна додати просту відповідь для перевірки, пізніше не знадобиться (ЗАБРАТИ)
-            SendMessage response = new SendMessage();
-            response.setChatId(chatId);
-            response.setText("Я отримав твоє повідомлення: " + messageText);
-            try {
-                execute(response); // Відправляємо відповідь
-                log.debug("Sent response to chat_id={}", chatId);
-            } catch (TelegramApiException e) {
-                log.error("Failed to send message to chat_id={}: {}", chatId, e.getMessage());
-            }
+        if (update != null) {
+            log.trace("Update received: {}", update.getUpdateId());
+            // Просто передаємо обробку в контролер
+            updateController.processUpdate(update);
         } else {
-            // Логуємо інші типи оновлень або ігноруємо їх
-            log.trace("Received an update that is not a text message: {}", update);
+            log.warn("Received null update");
         }
+
+        // !!! БЛОК З НЕГАЙНОЮ ВІДПОВІДДЮ ВИДАЛЕНО !!!
     }
 
-
+    // !!! РЕАЛІЗАЦІЯ МЕТОДУ ВІДПРАВКИ ВІДПОВІДІ !!!
     public void sendAnswerMessage(SendMessage sendMessage) {
+        if (sendMessage != null && sendMessage.getChatId() != null && sendMessage.getText() != null) {
+            try {
+                // Використовуємо метод execute() з батьківського класу TelegramLongPollingBot
+                execute(sendMessage);
+                log.debug("Sent answer message to chat_id={}", sendMessage.getChatId());
+            } catch (TelegramApiException e) {
+                // Логуємо помилку разом зі стектрейсом для кращої діагностики
+                log.error("Failed to send answer message to chat_id={}: {}", sendMessage.getChatId(), e.getMessage(), e);
+            }
+        } else {
+            // Логуємо, якщо прийшов некоректний об'єкт SendMessage
+            log.error("Attempted to send a null or incomplete SendMessage object: {}", sendMessage);
+        }
     }
 }
