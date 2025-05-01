@@ -34,3 +34,5 @@ public class RabbitConfiguration {
         return new Queue(ANSWER_MESSAGE);
     }
 }
+
+//тест
