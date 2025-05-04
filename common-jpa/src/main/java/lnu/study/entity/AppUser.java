@@ -24,13 +24,12 @@ public class AppUser {
     private Long telegramUserId;
     @CreationTimestamp
     private LocalDateTime firstLoginDateTime;
-    public String firstname;
-    public String lastname;
-    public String username;
+    public String firstName;
+    public String lastName;
+    public String userName;
     public String email;
     private boolean isActive;
     @Enumerated(EnumType.STRING)
     private UserState state;
-
 
 }
