@@ -11,6 +11,7 @@ import lnu.study.exceptions.UploadFileException;
 import lnu.study.service.FileService;
 import lnu.study.service.MainService;
 import lnu.study.service.ProducerService;
+import lnu.study.service.enums.LinkType;
 import lnu.study.service.enums.ServiceCommand;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
@@ -96,9 +97,9 @@ public class MainServiceImpl implements MainService {
         try {
             AppDocument doc = fileService.processDoc(update.getMessage());
             if (doc != null) {
-                // TODO Добавить генерацию реальной ссылки для скачивания документа
+                String Link = fileService.generateLink(doc.getId(), LinkType.GET_DOC);
                 var answer = "Документ успішно завантажено! "
-                        + "Посилання для скачування: http://test.ru/get-doc/" + doc.getId();
+                        + "Посилання для скачування:" + Link;
                 sendAnswer(answer, chatId);
             } else {
                 log.error("Document processing returned null for update: {}", update.getUpdateId());
@@ -139,9 +140,9 @@ public class MainServiceImpl implements MainService {
             // Викликаємо сервіс для обробки фото
             AppPhoto photo = fileService.processPhoto(update.getMessage());
             if (photo != null) {
-                // TODO: Додати генерацию реальної посилання для скачування фото
+                String Link = fileService.generateLink(photo.getId(), LinkType.GET_PHOTO);
                 var answer = "Фото успішно завантажено! "
-                        + "Посилання для скачування: http://test.ru/get-photo/" + photo.getId(); // Використовуємо ID фото
+                        + "Посилання для скачування:" + Link;
                 sendAnswer(answer, chatId);
             } else {
                 // Обробка випадку, коли сервіс повернув null, але не кинув UploadFileException

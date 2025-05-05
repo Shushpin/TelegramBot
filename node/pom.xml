@@ -62,6 +62,11 @@
             <artifactId>common-jpa</artifactId>
             <version>1.0-SNAPSHOT</version>
         </dependency>
+        <dependency>
+            <groupId>lnu.study</groupId>
+            <artifactId>common-utils</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
 
             <dependency>
                 <groupId>org.json</groupId>

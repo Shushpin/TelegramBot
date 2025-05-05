@@ -25,4 +25,8 @@ public class AppDocument {
     private BinaryContent binaryContent;
     private String mimeType;
     private Long fileSize;
+
+    public AppDocument orElse(Object o) {
+        return this;
+    }
 }

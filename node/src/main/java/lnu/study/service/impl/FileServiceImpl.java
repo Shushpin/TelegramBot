@@ -1,5 +1,7 @@
 package lnu.study.service.impl;
 
+import lnu.study.service.enums.LinkType;
+import lnu.study.utils.CryptoTool;
 import lombok.extern.log4j.Log4j2;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,17 +36,21 @@ public class FileServiceImpl implements FileService {
     private String fileInfoUri;
     @Value("${service.file_storage.uri}")
     private String fileStorageUri;
+    @Value("${link.address}")
+    private String linkAddress;
 
     private final AppDocumentDAO appDocumentDAO;
     private final AppPhotoDAO appPhotoDAO;
     private final BinaryContentDAO binaryContentDAO;
+    private final CryptoTool cryptoTool;
 
     public FileServiceImpl(AppDocumentDAO appDocumentDAO,
                            AppPhotoDAO appPhotoDAO,
-                           BinaryContentDAO binaryContentDAO) {
+                           BinaryContentDAO binaryContentDAO, CryptoTool cryptoTool) {
         this.appDocumentDAO = appDocumentDAO;
         this.appPhotoDAO = appPhotoDAO;
         this.binaryContentDAO = binaryContentDAO;
+        this.cryptoTool = cryptoTool;
     }
 
     @Override
@@ -89,6 +95,12 @@ public class FileServiceImpl implements FileService {
             throw new UploadFileException("Bad response from telegram service: " + response);
         }
     }
+
+    @Override
+    public String generateFileName(Long docId, LinkType linkType) {
+        return "";
+    }
+
 
     private BinaryContent getPersistentBinaryContent(ResponseEntity<String> response) {
         String filePath = getFilePathFromJsonResponse(response);
@@ -182,5 +194,11 @@ public class FileServiceImpl implements FileService {
             log.error("IOException while downloading file from {}: ", urlObj.toExternalForm(), e);
             throw new UploadFileException("Error downloading file: " + urlObj.toExternalForm(), e);
         }
+
+    }
+    @Override
+    public String generateLink(Long docId, LinkType linkType) {
+        var hash = cryptoTool.hashOf(docId);
+        return "http://" + linkAddress + "/" +linkType+ "?id=" + hash;
     }
 }
