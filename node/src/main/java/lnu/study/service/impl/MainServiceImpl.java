@@ -3,9 +3,10 @@ package lnu.study.service.impl;
 import lnu.study.dao.AppUserDAO;
 import lnu.study.dao.RawDataDAO;
 import lnu.study.entity.AppDocument;
+import lnu.study.entity.AppPhoto; // Потрібен імпорт AppPhoto
 import lnu.study.entity.AppUser;
 import lnu.study.entity.RawData;
-import lnu.study.entity.enums.UserState; // Додано явний імпорт, якщо раптом був відсутній
+import lnu.study.entity.enums.UserState;
 import lnu.study.exceptions.UploadFileException;
 import lnu.study.service.FileService;
 import lnu.study.service.MainService;
@@ -19,7 +20,7 @@ import org.telegram.telegrambots.meta.api.objects.User;
 
 import static lnu.study.entity.enums.UserState.BASIC_STATE;
 import static lnu.study.entity.enums.UserState.WAIT_FOR_EMAIL_STATE;
-import static lnu.study.service.enums.ServiceCommand.*; // Імпортує всі константи з ServiceCommand
+import static lnu.study.service.enums.ServiceCommand.*;
 
 
 @Log4j2
@@ -30,7 +31,6 @@ public class MainServiceImpl implements MainService {
     private final AppUserDAO appUserDAO;
     private final FileService fileService;
 
-    // Текст повідомлення винесено в константу для зручності
     private static final String FILE_RECEIVED_MESSAGE = "Файл отримано! Обробляється...";
 
     public MainServiceImpl(RawDataDAO rawDataDAO,
@@ -47,11 +47,15 @@ public class MainServiceImpl implements MainService {
     public void processTextMessage(Update update) {
         saveRawData(update);
         var appUser = findOrSaveAppUser(update);
+        // Додано перевірку appUser після findOrSaveAppUser
+        if (appUser == null) {
+            log.warn("Cannot process text message for update {} as AppUser is null.", update.getUpdateId());
+            return;
+        }
         var userState = appUser.getState();
         var text = update.getMessage().getText();
         var output = "";
 
-        // Обробка сервісних команд
         var serviceCommand = ServiceCommand.fromValue(text);
         if (CANCEL.equals(serviceCommand)) {
             output = cancelProcess(appUser);
@@ -60,7 +64,6 @@ public class MainServiceImpl implements MainService {
         } else if (WAIT_FOR_EMAIL_STATE.equals(userState)) {
             //TODO добавить обработку емейла
             log.info("TODO: Email processing needed for user: " + appUser.getId());
-            // Потрібно додати логіку обробки email або надіслати відповідь користувачу
             output = "Обробка email ще не реалізована.";
         } else {
             log.error("Unknown user state: " + userState);
@@ -68,7 +71,6 @@ public class MainServiceImpl implements MainService {
         }
 
         var chatId = update.getMessage().getChatId();
-        // Надсилаємо фінальну відповідь (результат команди або помилку стану)
         sendAnswer(output, chatId);
     }
 
@@ -76,31 +78,37 @@ public class MainServiceImpl implements MainService {
     public void processDocMessage(Update update) {
         saveRawData(update);
         var appUser = findOrSaveAppUser(update);
+        // Додано перевірку appUser після findOrSaveAppUser
+        if (appUser == null) {
+            log.warn("Cannot process doc message for update {} as AppUser is null.", update.getUpdateId());
+            return;
+        }
         var chatId = update.getMessage().getChatId();
 
-        // 1. Надсилаємо повідомлення "Обробляється..."
         sendAnswer(FILE_RECEIVED_MESSAGE, chatId);
 
-        // 2. Перевіряємо дозвіл
         String permissionError = checkPermissionError(appUser);
         if (permissionError != null) {
-            // 3а. Якщо дозволу немає, надсилаємо помилку і виходимо
             sendAnswer(permissionError, chatId);
             return;
         }
 
-        // 3б. Якщо дозвіл є, обробляємо документ
         try {
             AppDocument doc = fileService.processDoc(update.getMessage());
-            // TODO Добавить генерацию реальной ссылки для скачивания документа
-            var answer = "Документ успішно завантажено! "
-                    + "Посилання для скачування: http://test.ru/get-doc/" + doc.getId(); // Приклад використання ID
-            sendAnswer(answer, chatId);
+            if (doc != null) {
+                // TODO Добавить генерацию реальной ссылки для скачивания документа
+                var answer = "Документ успішно завантажено! "
+                        + "Посилання для скачування: http://test.ru/get-doc/" + doc.getId();
+                sendAnswer(answer, chatId);
+            } else {
+                log.error("Document processing returned null for update: {}", update.getUpdateId());
+                sendAnswer("Не вдалося обробити документ. Спробуйте пізніше.", chatId);
+            }
         } catch (UploadFileException ex) {
-            log.error("UploadFileException occurred: ", ex); // Краще логувати сам виняток
+            log.error("UploadFileException occurred during doc processing: ", ex);
             String error = "На жаль, завантаження файлу не вдалося. Спробуйте пізніше.";
             sendAnswer(error, chatId);
-        } catch (Exception e) { // Додано обробку інших можливих винятків
+        } catch (Exception e) {
             log.error("Exception occurred during doc processing: ", e);
             String error = "Сталася непередбачена помилка під час обробки файлу.";
             sendAnswer(error, chatId);
@@ -111,44 +119,55 @@ public class MainServiceImpl implements MainService {
     public void processPhotoMessage(Update update) {
         saveRawData(update);
         var appUser = findOrSaveAppUser(update);
+        // Додано перевірку appUser після findOrSaveAppUser
+        if (appUser == null) {
+            log.warn("Cannot process photo message for update {} as AppUser is null.", update.getUpdateId());
+            return;
+        }
         var chatId = update.getMessage().getChatId();
 
-        // 1. Надсилаємо повідомлення "Обробляється..."
-        sendAnswer(FILE_RECEIVED_MESSAGE, chatId); // Використовуємо те саме повідомлення
+        sendAnswer(FILE_RECEIVED_MESSAGE, chatId);
 
-        // 2. Перевіряємо дозвіл
         String permissionError = checkPermissionError(appUser);
         if (permissionError != null) {
-            // 3а. Якщо дозволу немає, надсилаємо помилку і виходимо
             sendAnswer(permissionError, chatId);
             return;
         }
 
-        // 3б. Якщо дозвіл є, обробляємо фото
-        // TODO: Додати логіку збереження фото та отримання посилання/ID
+        // --- ІНТЕГРОВАНО ТА ОНОВЛЕНО БЛОК ДЛЯ ФОТО ---
         try {
-            // Тут має бути виклик сервісу для обробки фото, аналогічно до fileService.processDoc
-            // fileService.processPhoto(update.getMessage());
-            log.info("TODO: Photo processing logic to be implemented for update: " + update.getUpdateId());
-            var answer = "Фото успішно завантажено! "
-                    + "Посилання для скачування: http://test.ru/get-photo/777"; // Заглушка
-            sendAnswer(answer, chatId);
-        } catch (Exception e) { // Обробка можливих винятків при роботі з фото
+            // Викликаємо сервіс для обробки фото
+            AppPhoto photo = fileService.processPhoto(update.getMessage());
+            if (photo != null) {
+                // TODO: Додати генерацию реальної посилання для скачування фото
+                var answer = "Фото успішно завантажено! "
+                        + "Посилання для скачування: http://test.ru/get-photo/" + photo.getId(); // Використовуємо ID фото
+                sendAnswer(answer, chatId);
+            } else {
+                // Обробка випадку, коли сервіс повернув null, але не кинув UploadFileException
+                log.error("Photo processing returned null for update: {}", update.getUpdateId());
+                sendAnswer("Не вдалося обробити фото. Спробуйте пізніше.", chatId);
+            }
+        } catch (UploadFileException ex) { // Обробка специфічної помилки завантаження
+            log.error("UploadFileException occurred during photo processing: ", ex);
+            // Повідомлення про помилку стандартизовано українською
+            String error = "На жаль, завантаження фото не вдалося. Спробуйте пізніше.";
+            sendAnswer(error, chatId);
+        } catch (Exception e) { // Обробка інших можливих помилок
             log.error("Exception occurred during photo processing: ", e);
             String error = "Сталася непередбачена помилка під час обробки фото.";
             sendAnswer(error, chatId);
         }
+        // --- КІНЕЦЬ ІНТЕГРОВАНОГО БЛОКУ ---
     }
 
-    /**
-     * Перевіряє, чи дозволено користувачу надсилати контент.
-     * Повертає рядок з текстом помилки, якщо не дозволено, або null, якщо дозволено.
-     * НЕ надсилає повідомлення самостійно.
-     *
-     * @param appUser Користувач для перевірки.
-     * @return Текст помилки або null.
-     */
+
     private String checkPermissionError(AppUser appUser) {
+        // Додано перевірку, що appUser не null перед доступом до його полів/методів
+        if (appUser == null) {
+            // Цього не мало б статися, якщо findOrSaveAppUser обробив null, але про всяк випадок
+            return "Помилка: не вдалося визначити користувача.";
+        }
         var userState = appUser.getState();
         if (!appUser.isActive()) {
             return "Зареєструйтесь або активуйте "
@@ -160,16 +179,13 @@ public class MainServiceImpl implements MainService {
     }
 
 
-    // --- Решта методів залишаються без змін ---
-
     private void sendAnswer(String output, Long chatId) {
         if (output == null || output.isEmpty()) {
-            // Не надсилаємо порожні повідомлення
             log.warn("Attempted to send null or empty message to chat ID: " + chatId);
             return;
         }
         SendMessage sendMessage = new SendMessage();
-        sendMessage.setChatId(chatId.toString()); // Краще використовувати toString() для chatId
+        sendMessage.setChatId(chatId.toString());
         sendMessage.setText(output);
         producerService.producerAnswer(sendMessage);
     }
@@ -202,20 +218,22 @@ public class MainServiceImpl implements MainService {
     }
 
     private AppUser findOrSaveAppUser(Update update) {
+        // Додано перевірку message на null
+        if (update == null || update.getMessage() == null) {
+            log.error("Update or message is null in findOrSaveAppUser");
+            return null;
+        }
         User telegramUser = update.getMessage().getFrom();
-        // Додамо перевірку на null для telegramUser на випадок дивних апдейтів
         if (telegramUser == null) {
             log.error("Update received without user info: {}", update.getUpdateId());
-            // Потрібно вирішити, що робити в цьому випадку. Кидати виняток? Повертати null?
-            // Поки що повернемо null, але це може викликати NPE далі.
-            return null; // Або кинути виняток
+            return null;
         }
 
         AppUser persistentAppUser = appUserDAO.findAppUserByTelegramUserId(telegramUser.getId());
         if (persistentAppUser == null) {
             AppUser transientAppUser = AppUser.builder()
                     .telegramUserId(telegramUser.getId())
-                    .userName(telegramUser.getUserName()) // Змінено на userName (якщо поле в AppUser так називається)
+                    .userName(telegramUser.getUserName())
                     .firstName(telegramUser.getFirstName())
                     .lastName(telegramUser.getLastName())
                     //TODO змінити значення за замовчуванням після додавання реєстрації
@@ -228,7 +246,6 @@ public class MainServiceImpl implements MainService {
     }
 
     private void saveRawData(Update update) {
-        // Додамо перевірку, щоб не зберігати "порожні" Update
         if (update == null || update.getUpdateId() == null) {
             log.warn("Attempted to save null or invalid Update object.");
             return;

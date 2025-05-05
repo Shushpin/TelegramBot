@@ -2,15 +2,14 @@ package lnu.study.entity;
 
 import jakarta.persistence.*;
 import lnu.study.entity.enums.UserState;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
 
-
+@Getter
+@Setter
+@EqualsAndHashCode(exclude = "id")
 @Data
 @Builder
 @NoArgsConstructor
