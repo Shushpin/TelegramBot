@@ -9,7 +9,7 @@ public class CryptoTool {
         var minHashLength = 10;
         this.hashids = new Hashids(salt, minHashLength);
     }
-public String hashOf(Long value){
+    public String hashOf(Long value){
         return hashids.encode(value);
     }
 

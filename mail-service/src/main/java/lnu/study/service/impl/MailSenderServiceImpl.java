@@ -68,3 +68,4 @@ public class MailSenderServiceImpl implements MailSenderService {
         return messageBody;
     }
 }
+

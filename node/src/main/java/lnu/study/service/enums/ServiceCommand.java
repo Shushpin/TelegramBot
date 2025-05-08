@@ -4,7 +4,8 @@ public enum ServiceCommand {
     HELP("/help"),
     REGISTRATION("/registration"),
     CANCEL("/cancel"),
-    START("/start");
+    START("/start"),
+    RESEND_EMAIL("/resend_email");
 
     private final String value;
 
@@ -27,4 +28,5 @@ public enum ServiceCommand {
         }
         return null;
     }
+
 }
