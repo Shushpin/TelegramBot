@@ -2,6 +2,9 @@ server.port=8084
 
 bot.name={NAME_YOU_NEED_TO_ADD}
 bot.token={YOUR_TOKEN_HERE}
+bot.uri={YOUR_STATIC_IP_FROM_NGROK}.ngrok-free.app
+
+server.ssl.enabled=false
 
 
 spring.rabbitmq.host=localhost

@@ -2,82 +2,100 @@ package lnu.study.controller;
 
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
-import org.telegram.telegrambots.bots.TelegramLongPollingBot;
-import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.bots.TelegramWebhookBot;
+import org.telegram.telegrambots.meta.api.methods.BotApiMethod;
+import org.telegram.telegrambots.meta.api.methods.send.SendMessage; // <<< РОЗКОМЕНТУЙТЕ АБО ДОДАЙТЕ ЦЕЙ ІМПОРТ!
+import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
-import org.telegram.telegrambots.meta.TelegramBotsApi;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
-
 
 @Component
-public class TelegramBot extends TelegramLongPollingBot {
+public class TelegramBot extends TelegramWebhookBot {
 
     private static final Logger log = LogManager.getLogger(TelegramBot.class);
 
     private final String botName;
-    private final TelegramBotsApi telegramBotsApi;
-    private final UpdateController updateController; // Зробимо final
+    private final String botToken;
+    private final String botUri;
+    private final UpdateProcessor updateProcessor;
 
-    @PostConstruct
-    public void init(){
-        updateController.registerBot(this);
-        log.info("TelegramBot instance registered in UpdateController.");
-    }
 
     @Autowired
     public TelegramBot(@Value("${bot.name}") String botName,
                        @Value("${bot.token}") String botToken,
-                       UpdateController updateController) throws TelegramApiException {
+                       @Value("${bot.uri}") String botUri,
+                       @Lazy UpdateProcessor updateProcessor) {
         super(botToken);
         this.botName = botName;
-        this.updateController = updateController; // Ініціалізуємо final поле
-        this.telegramBotsApi = new TelegramBotsApi(DefaultBotSession.class);
+        this.botToken = botToken;
+        this.botUri = botUri;
+        this.updateProcessor = updateProcessor;
+        log.info("TelegramBot initialized with UpdateProcessor.");
+    }
+
+    @Override
+    public BotApiMethod<?> onWebhookUpdateReceived(Update update) {
+        log.debug("TelegramBot: Webhook update_id: {} received.", update.getUpdateId());
         try {
-            this.telegramBotsApi.registerBot(this);
-            log.info("Telegram bot {} registered successfully!", botName);
+            updateProcessor.processUpdate(update);
+        } catch (Exception e) {
+            log.error("TelegramBot: Error processing update_id {} in UpdateProcessor from onWebhookUpdateReceived: {}", update.getUpdateId(), e.getMessage(), e);
+        }
+        return null;
+    }
+
+    @PostConstruct
+    public void init() {
+        log.info("Initializing TelegramBot with webhook URI: {}", botUri);
+        try {
+            SetWebhook setWebhook = SetWebhook.builder()
+                    .url(this.botUri)
+                    .build();
+            this.setWebhook(setWebhook);
+            log.info("Webhook set successfully to URI: {}", this.botUri);
         } catch (TelegramApiException e) {
-            log.error("Error registering bot {}: {}", botName, e.getMessage());
-            throw e;
+            log.error("Error setting webhook: {}", e.getMessage(), e);
         }
     }
 
     @Override
     public String getBotUsername() {
-        return botName;
+        return this.botName;
     }
+
 
     @Override
-    public void onUpdateReceived(Update update) {
-        if (update != null) {
-            log.trace("Update received: {}", update.getUpdateId());
-            // Просто передаємо обробку в контролер
-            updateController.processUpdate(update);
-        } else {
-            log.warn("Received null update");
-        }
-
-        // !!! БЛОК З НЕГАЙНОЮ ВІДПОВІДДЮ ВИДАЛЕНО !!!
+    public String getBotPath() {
+        return "update"; // Переконайтеся, що це узгоджено з bot.uri
     }
 
-    // !!! РЕАЛІЗАЦІЯ МЕТОДУ ВІДПРАВКИ ВІДПОВІДІ !!!
+    // ===== ДОДАЙТЕ ЦЕЙ МЕТОД! =====
     public void sendAnswerMessage(SendMessage sendMessage) {
-        if (sendMessage != null && sendMessage.getChatId() != null && sendMessage.getText() != null) {
-            try {
-                // Використовуємо метод execute() з батьківського класу TelegramLongPollingBot
-                execute(sendMessage);
-                log.debug("Sent answer message to chat_id={}", sendMessage.getChatId());
-            } catch (TelegramApiException e) {
-                // Логуємо помилку разом зі стектрейсом для кращої діагностики
-                log.error("Failed to send answer message to chat_id={}: {}", sendMessage.getChatId(), e.getMessage(), e);
-            }
-        } else {
-            // Логуємо, якщо прийшов некоректний об'єкт SendMessage
-            log.error("Attempted to send a null or incomplete SendMessage object: {}", sendMessage);
+        if (sendMessage == null) {
+            log.error("Attempted to send a null SendMessage object.");
+            return;
+        }
+        if (sendMessage.getChatId() == null || sendMessage.getChatId().isEmpty()) {
+            log.error("Attempted to send SendMessage with null or empty chatId: {}", sendMessage.getText());
+            return;
+        }
+        if (sendMessage.getText() == null || sendMessage.getText().isEmpty()) {
+            log.warn("Attempted to send SendMessage with null or empty text to chatId {}.", sendMessage.getChatId());
+            // Можливо, іноді потрібно надсилати порожні повідомлення або повідомлення без тексту (наприклад, тільки з клавіатурою)
+            // Але для простоти зараз логуємо як попередження.
+        }
+
+        try {
+            execute(sendMessage); // Метод execute успадкований від TelegramWebhookBot (або TelegramLongPollingBot)
+            log.debug("Message sent to chat_id={}: '{}'", sendMessage.getChatId(), sendMessage.getText());
+        } catch (TelegramApiException e) {
+            log.error("Failed to send message to chat_id={}: {}", sendMessage.getChatId(), e.getMessage(), e);
         }
     }
+    // ===============================
 }
