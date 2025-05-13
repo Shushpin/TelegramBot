@@ -12,4 +12,6 @@ public interface FileService {
     String generateFileName(Long docId, LinkType linkType);
 
     String generateLink(Long docId, LinkType linkType);
+
+    byte[] downloadFileAsByteArray(String fileId);
 }

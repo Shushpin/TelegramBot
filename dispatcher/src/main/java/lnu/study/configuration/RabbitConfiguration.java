@@ -1,5 +1,7 @@
 package lnu.study.configuration;
 
+import com.fasterxml.jackson.databind.DeserializationFeature; // <<< ДОДАЙ ЦЕЙ ІМПОРТ
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
@@ -12,7 +14,18 @@ import static lnu.study.model.RabbitQueue.*;
 public class RabbitConfiguration {
     @Bean
     public MessageConverter jsonmessageConverter() {
+        // Можна залишити як є, або передати налаштований objectMapper:
+        // return new Jackson2JsonMessageConverter(objectMapper());
         return new Jackson2JsonMessageConverter();
+    }
+
+    @Bean
+    public ObjectMapper objectMapper() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        // <<< --- ДОДАЙ ЦЕЙ РЯДОК --- >>>
+        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        // <<< ---------------------- >>>
+        return objectMapper;
     }
 
     @Bean
@@ -34,5 +47,3 @@ public class RabbitConfiguration {
         return new Queue(ANSWER_MESSAGE);
     }
 }
-
-//тест

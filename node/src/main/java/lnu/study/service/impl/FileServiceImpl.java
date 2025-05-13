@@ -201,4 +201,22 @@ public class FileServiceImpl implements FileService {
         var hash = cryptoTool.hashOf(docId);
         return "http://" + linkAddress + "/" +linkType+ "?id=" + hash;
     }
+    @Override
+    public byte[] downloadFileAsByteArray(String fileId) {
+        if (fileId == null || fileId.isBlank()) {
+            log.error("File ID is null or blank for downloadFileAsByteArray.");
+            throw new UploadFileException("File ID is required to download the file.");
+        }
+        log.info("Attempting to download file directly from Telegram for fileId: {}", fileId);
+        ResponseEntity<String> response = getFilePathResponseEntity(fileId); // Використовуємо існуючий метод
+        if (response.getStatusCode() == HttpStatus.OK) {
+            String filePath = getFilePathFromJsonResponse(response); // Використовуємо існуючий метод
+            // Тепер викликаємо downloadFile, який повертає byte[]
+            // Цей метод вже є у вас і робить саме те, що нам потрібно!
+            return downloadFile(filePath);
+        } else {
+            log.error("Failed to get file path for fileId {} during direct download. Response: {}", fileId, response);
+            throw new UploadFileException("Bad response from telegram service when getting file path: " + response);
+        }
+    }
 }
