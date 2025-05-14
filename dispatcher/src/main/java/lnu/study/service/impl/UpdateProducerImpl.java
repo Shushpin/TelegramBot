@@ -6,6 +6,8 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.objects.Update;
 
+import static lnu.study.model.RabbitQueue.VOICE_MESSAGE_UPDATE;
+
 @Service
 @Log4j2
 public class UpdateProducerImpl implements UpdateProducer {
@@ -21,5 +23,9 @@ public class UpdateProducerImpl implements UpdateProducer {
         log.debug(update.getMessage().getText());
         log.info("Intending to produce update_id={} to queue '{}'", update.getUpdateId(), rabbitQueue); //hai bude
         rabbitTemplate.convertAndSend(rabbitQueue, update);
+    }
+    @Override
+    public void produceVoiceMessage(Update update) {
+        rabbitTemplate.convertAndSend(VOICE_MESSAGE_UPDATE, update);
     }
 }

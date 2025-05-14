@@ -46,4 +46,8 @@ public class RabbitConfiguration {
         rabbitTemplate.setMessageConverter(messageConverter); // <<< Встановлюємо конвертер
         return rabbitTemplate;
     }
+    @Bean
+    public Queue voiceMessageQueue() {
+        return new Queue(VOICE_MESSAGE_UPDATE);
+    }
 }

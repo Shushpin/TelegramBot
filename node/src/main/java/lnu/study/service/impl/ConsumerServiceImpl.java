@@ -47,4 +47,10 @@ public class ConsumerServiceImpl implements ConsumerService {
 
 
     }
+
+    @RabbitListener(queues = VOICE_MESSAGE_UPDATE)
+    public void consumeVoiceMessageUpdates(Update update) {
+        log.debug("NODE: Voice Message is received from RabbitMQ");
+        mainService.processVoiceMessage(update);
+    }
 }

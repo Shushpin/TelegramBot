@@ -9,5 +9,8 @@ import org.springframework.http.ResponseEntity;
         // targetFormat - бажаний формат ("png", "mp3", "pdf" і т.д.)
         // converterApiEndpoint - частина URL після базового URI (напр., "/image/convert", "/audio/convert")
         ResponseEntity<byte[]> convertFile(ByteArrayResource fileResource, String fileName, String targetFormat, String converterApiEndpoint);
+
+        ResponseEntity<byte[]> convertAudioFile(ByteArrayResource fileResource, String originalFilename, String targetFormat, String converterApiEndpoint);
+
     }
 

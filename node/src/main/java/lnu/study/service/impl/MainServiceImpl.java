@@ -2,18 +2,16 @@ package lnu.study.service.impl;
 
 import lnu.study.dao.AppUserDAO;
 import lnu.study.dao.RawDataDAO;
-import lnu.study.dto.DocumentToSendDTO; // Імпорт DocumentToSendDTO
+import lnu.study.dto.AudioToSendDTO;
+import lnu.study.dto.DocumentToSendDTO;
 import lnu.study.dto.PhotoToSendDTO;
 import lnu.study.entity.AppDocument;
 import lnu.study.entity.AppPhoto;
 import lnu.study.entity.AppUser;
 import lnu.study.entity.RawData;
-import lnu.study.entity.enums.UserState;
+// import lnu.study.entity.enums.UserState; // Використовується через статичний імпорт
 import lnu.study.exceptions.UploadFileException;
-import lnu.study.service.AppUserService;
-import lnu.study.service.FileService;
-import lnu.study.service.MainService;
-import lnu.study.service.ProducerService;
+import lnu.study.service.*; // Wildcard import
 import lnu.study.service.enums.LinkType;
 import lnu.study.service.enums.ServiceCommand;
 import lombok.extern.log4j.Log4j2;
@@ -28,15 +26,9 @@ import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.PhotoSize;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
-import lnu.study.service.ConverterClientService;
-// org.telegram.telegrambots.meta.api.methods.send.SendDocument; // Не використовується для прямої відправки звідси
-// org.telegram.telegrambots.meta.api.methods.send.SendPhoto; // Не використовується для прямої відправки звідси
-// org.telegram.telegrambots.meta.api.objects.InputFile; // Не використовується для прямої відправки звідси
-// import java.io.ByteArrayInputStream; // Не використовується для прямої відправки звідси
+import org.telegram.telegrambots.meta.api.objects.Voice; // НОВИЙ КОД: Імпорт для Voice
 
 import java.util.Comparator;
-import java.util.Optional;
-
 
 import static lnu.study.entity.enums.UserState.*;
 import static lnu.study.service.enums.ServiceCommand.*;
@@ -51,9 +43,7 @@ public class MainServiceImpl implements MainService {
     private final AppUserService appUserService;
     private final ConverterClientService converterClientService;
 
-    private static final String FILE_RECEIVED_MESSAGE = "Файл отримано! Обробляється...";
-    // private static final String CONVERT_FILE_PROMPT = "Будь ласка, надішліть файл, який ви бажаєте конвертувати."; // Вже є в processTextMessage
-
+    private static final String TARGET_VOICE_CONVERT_FORMAT = "mp3"; // НОВИЙ КОД
 
     public MainServiceImpl(RawDataDAO rawDataDAO,
                            ProducerService producerService,
@@ -68,7 +58,7 @@ public class MainServiceImpl implements MainService {
     }
 
     @Override
-    @Transactional // Додаємо, оскільки є appUserDAO.save(appUser)
+    @Transactional
     public void processTextMessage(Update update) {
         saveRawData(update);
         var appUser = findOrSaveAppUser(update);
@@ -76,7 +66,6 @@ public class MainServiceImpl implements MainService {
             log.warn("Cannot process text message for update {} as AppUser is null.", update.getUpdateId());
             return;
         }
-        // log.info("ENTERING processTextMessage for user {}. Current state: {}", appUser.getTelegramUserId(), appUser.getState()); // Лог processDocMessage був тут помилково
 
         var userState = appUser.getState();
         var text = update.getMessage().getText();
@@ -91,8 +80,7 @@ public class MainServiceImpl implements MainService {
         } else if (RESEND_EMAIL.equals(serviceCommand)) {
             log.info("Processing /resend_email command for user {}", appUser.getTelegramUserId());
             output = appUserService.resendActivationEmail(appUser);
-        }
-        else if (CONVERT_FILE.equals(serviceCommand)) {
+        } else if (CONVERT_FILE.equals(serviceCommand)) {
             log.info("Processing /convert_file command for user {}", appUser.getTelegramUserId());
             if (!appUser.isActive()) {
                 if (WAIT_FOR_EMAIL_STATE.equals(userState)) {
@@ -103,56 +91,45 @@ public class MainServiceImpl implements MainService {
             } else {
                 if (!BASIC_STATE.equals(userState) && !AWAITING_FILE_FOR_CONVERSION.equals(userState)) {
                     log.info("User {} was in state {}. Cancelling previous operation and proceeding with /convert_file.", appUser.getTelegramUserId(), userState);
-                    // Можна додати sendAnswer(cancelProcess(appUser), update.getMessage().getChatId()); якщо потрібно окреме повідомлення про скасування
-                    // Або просто скинути стан:
                     appUser.setState(BASIC_STATE);
-                    // appUserDAO.save(appUser); // Збережеться нижче
                 }
                 appUser.setState(AWAITING_FILE_FOR_CONVERSION);
                 appUserDAO.save(appUser);
                 log.info("User {} state set to AWAITING_FILE_FOR_CONVERSION and saved.", appUser.getTelegramUserId());
-                output = "Будь ласка, надішліть файл (фото або DOCX), який ви бажаєте конвертувати."; // Оновлено промпт
+                // ЗМІНЕНО: Оновлено промпт
+                output = "Будь ласка, надішліть файл для конвертації:\n" +
+                        "- DOCX (в PDF)\n" +
+                        "- Фото (в PNG)\n" +
+                        "- Голосове повідомлення (в " + TARGET_VOICE_CONVERT_FORMAT.toUpperCase() + ").";
             }
-        }
-        else if (WAIT_FOR_EMAIL_STATE.equals(userState)) {
+        } else if (WAIT_FOR_EMAIL_STATE.equals(userState)) {
             if (serviceCommand == null) {
-                log.info("User {} is in WAIT_FOR_EMAIL_STATE, processing text '{}' as email.", appUser.getTelegramUserId(), text);
                 output = appUserService.setEmail(appUser, text);
             } else {
-                log.warn("User {} sent command '{}' while in WAIT_FOR_EMAIL_STATE.", appUser.getTelegramUserId(), text);
-                if (START.equals(serviceCommand) || HELP.equals(serviceCommand)) {
+                // Обробка команд, коли очікується email
+                if (START.equals(serviceCommand) || HELP.equals(serviceCommand) || CANCEL.equals(serviceCommand)) {
                     output = processServiceCommand(appUser, text);
-                } else if (REGISTRATION.equals(serviceCommand)) {
-                    output = "Ви вже в процесі реєстрації. Будь ласка, надішліть свій email або введіть /cancel для скасування.";
+                } else if (REGISTRATION.equals(serviceCommand)){
+                    output = "Ви вже в процесі реєстрації. Надішліть email або /cancel.";
                 } else {
-                    output = "Ви перебуваєте в процесі введення email. Будь ласка, надішліть свій email або введіть /cancel для скасування.";
+                    output = "Очікую на ваш email. Надішліть його або скасуйте операцію (/cancel).";
                 }
+            }
+        } else if (AWAITING_FILE_FOR_CONVERSION.equals(userState)) {
+            if (serviceCommand == null) { // Користувач надіслав текст, а не команду/файл
+                output = "Очікую на файл для конвертації (DOCX, фото або голосове). Надішліть файл або /cancel.";
+            } else { // Користувач надіслав команду
+                output = processServiceCommand(appUser, text);
             }
         } else if (BASIC_STATE.equals(userState)) {
             output = processServiceCommand(appUser, text);
-        }
-        else if (AWAITING_FILE_FOR_CONVERSION.equals(userState)) {
-            if (serviceCommand == null) {
-                output = "Очікую на файл для конвертації. Будь ласка, надішліть фото або DOCX файл, або введіть /cancel для скасування.";
-            } else {
-                output = processServiceCommand(appUser, text);
-            }
-        }
-        else {
-            if (serviceCommand != null) {
-                output = processServiceCommand(appUser, text);
-            } else {
-                log.warn("User {} is in an unhandled state: {} and sent text: '{}'. Sending default help.", appUser.getTelegramUserId(), userState, text);
-                output = "Не розумію вас у поточному стані. " + help();
-            }
+        } else {
+            log.warn("Unhandled state: {} for user {} with text: '{}'", userState, appUser.getTelegramUserId(), text);
+            output = "Не розумію вас у поточному стані. " + help();
         }
 
-        // Надсилаємо відповідь тільки якщо output не порожній
         if (output != null && !output.isEmpty()) {
-            log.info("Final text output for user_id: {}: '{}'", appUser.getTelegramUserId(), output);
             sendAnswer(output, update.getMessage().getChatId());
-        } else {
-            log.debug("No direct text output to send for user_id: {}", appUser.getTelegramUserId());
         }
     }
 
@@ -161,10 +138,7 @@ public class MainServiceImpl implements MainService {
     public void processDocMessage(Update update) {
         saveRawData(update);
         var appUser = findOrSaveAppUser(update);
-        if (appUser == null) {
-            log.warn("Cannot process doc message for update {} as AppUser is null.", update.getUpdateId());
-            return;
-        }
+        if (appUser == null) return;
         log.info("ENTERING processDocMessage for user {}. Current state: {}", appUser.getTelegramUserId(), appUser.getState());
 
         var chatId = update.getMessage().getChatId();
@@ -172,175 +146,105 @@ public class MainServiceImpl implements MainService {
         Message message = update.getMessage();
 
         if (AWAITING_FILE_FOR_CONVERSION.equals(appUser.getState())) {
-            log.info("STATE IS AWAITING_FILE_FOR_CONVERSION - Proceeding with document conversion logic for user {}", appUser.getTelegramUserId());
-
+            log.info("STATE IS AWAITING_FILE_FOR_CONVERSION (DocMessage) for user {}", telegramUserId);
             if (!appUser.isActive()) {
                 sendAnswer("Будь ласка, активуйте свій акаунт перед конвертацією файлів.", chatId);
-                // Не змінюємо стан, щоб користувач міг активуватися і спробувати знову
                 return;
             }
 
             Document document = message.getDocument();
             if (document == null) {
-                log.warn("User {} sent a message without a document while in AWAITING_FILE_FOR_CONVERSION state.", telegramUserId);
-                sendAnswer("Очікувався документ. Будь ласка, надішліть DOCX файл для конвертації в PDF або скасуйте операцію /cancel.", chatId);
-                // Стан не змінюємо, дозволяємо користувачу спробувати ще раз
-                return;
+                sendAnswer("Помилка: очікувався документ, але його не знайдено.", chatId); return;
             }
 
             String originalFileName = document.getFileName();
             String mimeType = document.getMimeType();
             String fileId = document.getFileId();
-            byte[] fileData;
 
-            // Перевіряємо, чи це DOCX файл
             boolean isDocx = (originalFileName != null && originalFileName.toLowerCase().endsWith(".docx")) ||
                     (mimeType != null && mimeType.equals("application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
-
-            // Перевіряємо, чи це фото, надіслане як документ
             boolean isPhotoAsDocument = mimeType != null && mimeType.startsWith("image/");
 
-
-            if (!isDocx && !isPhotoAsDocument) { // Якщо це НЕ DOCX і НЕ фото
-                log.warn("User {} sent an unsupported file type ('{}', MIME: '{}') for conversion.", telegramUserId, originalFileName, mimeType);
-                sendAnswer("Підтримуються лише файли DOCX (для конвертації в PDF) та фото (для конвертації в PNG). Будь ласка, надішліть відповідний файл або скасуйте операцію /cancel.", chatId);
-                // Не змінюємо стан, дозволяємо спробувати ще
-                return;
-            }
-
-
-            try {
-                fileData = fileService.downloadFileAsByteArray(fileId);
-                if (fileData == null || fileData.length == 0) {
-                    throw new UploadFileException("Завантажені дані файлу порожні або відсутні.");
+            if (isDocx || isPhotoAsDocument) { // Існуюча логіка для DOCX та фото як документів
+                byte[] fileData;
+                try {
+                    fileData = fileService.downloadFileAsByteArray(fileId);
+                    if (fileData == null || fileData.length == 0) throw new UploadFileException("Файл порожній.");
+                    log.info("Downloaded file for conversion: {}, MIME: {}, Size: {}", originalFileName, mimeType, fileData.length);
+                } catch (Exception e) {
+                    log.error("Failed to download file (doc/photo_doc) for conversion: {}", e.getMessage());
+                    sendAnswer("Не вдалося завантажити файл для конвертації. Спробуйте ще раз.", chatId);
+                    return;
                 }
-                log.info("Successfully downloaded file for conversion: Name='{}', MIME='{}', Size={}", originalFileName, mimeType, fileData.length);
-            } catch (UploadFileException e) {
-                log.error("Failed to download file for conversion (fileId: {}) for user {}: {}", fileId, telegramUserId, e.getMessage());
-                sendAnswer("Не вдалося завантажити ваш файл для конвертації. Спробуйте ще раз або скасуйте /cancel.", chatId);
-                return;
-            } catch (Exception e) {
-                log.error("Unexpected error downloading file for conversion (fileId: {}) for user {}: {}", fileId, telegramUserId, e.getMessage(), e);
-                sendAnswer("Сталася непередбачена помилка під час завантаження вашого файлу. Спробуйте ще раз або скасуйте /cancel.", chatId);
-                return;
-            }
 
-            String targetFormat;
-            String converterApiEndpoint;
-            String fileTypeDescription;
+                final String finalOriginalFileName = originalFileName;
+                ByteArrayResource fileResource = new ByteArrayResource(fileData) {
+                    @Override
+                    public String getFilename() { return finalOriginalFileName; }
+                };
 
-            if (isDocx) {
-                targetFormat = "pdf";
-                converterApiEndpoint = "/api/document/convert";
-                fileTypeDescription = "Документ";
-            } else { // isPhotoAsDocument
-                targetFormat = "png";
-                // ЗМІНЕНО: виправляємо ендпоінт для фото
-                converterApiEndpoint = "/api/convert"; // <--- ВИПРАВЛЕНО
-                fileTypeDescription = "Фото";
-                // Якщо ім'я файлу для фото не надано, генеруємо його
-                if (originalFileName == null || !originalFileName.toLowerCase().matches(".+\\.(jpg|jpeg|png|gif|bmp|tiff)$")) {
-                    originalFileName = "photo_as_doc_" + telegramUserId + "_" + System.currentTimeMillis() + ".jpg"; // Припускаємо jpg, якщо невідомо
-                }
-            }
+                String targetFormat = isDocx ? "pdf" : "png";
+                String converterApiEndpoint = isDocx ? "/api/document/convert" : "/api/convert";
+                String fileTypeDescription = isDocx ? "Документ" : "Фото (як документ)";
 
+                sendAnswer(fileTypeDescription + " '" + finalOriginalFileName + "' отримано. Конвертую в " + targetFormat.toUpperCase() + "...", chatId);
 
-            String finalOriginalFileName = originalFileName;
-            ByteArrayResource fileResource = new ByteArrayResource(fileData) {
-                @Override
-                public String getFilename() {
-                    return finalOriginalFileName;
-                }
-            };
+                try {
+                    ResponseEntity<byte[]> response = converterClientService.convertFile(fileResource, finalOriginalFileName, targetFormat, converterApiEndpoint);
+                    if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                        byte[] convertedFileData = response.getBody();
+                        String baseName = finalOriginalFileName.contains(".") ? finalOriginalFileName.substring(0, finalOriginalFileName.lastIndexOf('.')) : finalOriginalFileName;
+                        String convertedFileName = "converted_" + baseName + "." + targetFormat;
 
-            sendAnswer(fileTypeDescription + " '" + originalFileName + "' отримано. Розпочинаю конвертацію в " + targetFormat.toUpperCase() + "...", chatId);
-
-            try {
-                ResponseEntity<byte[]> response = converterClientService.convertFile(fileResource, originalFileName, targetFormat, converterApiEndpoint);
-
-                if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-                    byte[] convertedFileData = response.getBody();
-                    log.info("{} '{}' successfully converted to {}. Size: {} bytes. Preparing to send to user...", fileTypeDescription, originalFileName, targetFormat, convertedFileData.length);
-
-                    String baseName = originalFileName.contains(".") ? originalFileName.substring(0, originalFileName.lastIndexOf('.')) : originalFileName;
-                    String convertedFileName = "converted_" + baseName + "." + targetFormat;
-
-                    if (isDocx) {
-                        DocumentToSendDTO documentDTO = DocumentToSendDTO.builder()
-                                .chatId(chatId.toString())
-                                .documentBytes(convertedFileData)
-                                .fileName(convertedFileName)
-                                .build();
-                        producerService.producerSendDocumentDTO(documentDTO);
-                        log.info("Sent DocumentToSendDTO to producer for chat_id: {}", chatId);
-                    } else { // isPhotoAsDocument
-                        PhotoToSendDTO photoDTO = PhotoToSendDTO.builder()
-                                .chatId(chatId.toString())
-                                .photoBytes(convertedFileData)
-                                .fileName(convertedFileName)
-                                .build();
-                        producerService.producerSendPhotoDTO(photoDTO);
-                        log.info("Sent PhotoToSendDTO (from document) to producer for chat_id: {}", chatId);
+                        if (isDocx) {
+                            producerService.producerSendDocumentDTO(DocumentToSendDTO.builder()
+                                    .chatId(chatId.toString()).documentBytes(convertedFileData).fileName(convertedFileName).caption("Сконвертовано: "+finalOriginalFileName).build());
+                        } else {
+                            producerService.producerSendPhotoDTO(PhotoToSendDTO.builder()
+                                    .chatId(chatId.toString()).photoBytes(convertedFileData).fileName(convertedFileName).caption("Сконвертовано: "+finalOriginalFileName).build());
+                        }
+                        sendAnswer(fileTypeDescription + " '" + finalOriginalFileName + "' успішно сконвертовано!", chatId);
+                    } else {
+                        log.error("Conversion failed for {} '{}'. Status: {}", fileTypeDescription, finalOriginalFileName, response.getStatusCode());
+                        sendAnswer("Помилка конвертації " + fileTypeDescription.toLowerCase() + ". Статус: " + response.getStatusCode(), chatId);
                     }
-
-                    // ТІЛЬКИ ОДНЕ ПОВІДОМЛЕННЯ ПРО УСПІХ
-                    sendAnswer(fileTypeDescription + " '" + originalFileName + "' успішно сконвертовано в " + targetFormat.toUpperCase() + " та поставлено в чергу на відправку!", chatId);
-
-                } else {
-                    String errorDetails = response.getBody() != null ? new String(response.getBody()) : "Немає деталей";
-                    log.error("Failed to convert {} '{}'. Status: {}. Details: {}", fileTypeDescription.toLowerCase(), originalFileName, response.getStatusCode(), errorDetails);
-                    sendAnswer("На жаль, сталася помилка під час конвертації " + fileTypeDescription.toLowerCase() + " '" + originalFileName + "'. Спробуйте інший файл.", chatId);
+                } catch (Exception e) {
+                    log.error("Exception during conversion call for {}: {}", finalOriginalFileName, e.getMessage(), e);
+                    sendAnswer("Критична помилка сервісу конвертації для " + fileTypeDescription.toLowerCase() + ".", chatId);
+                } finally {
+                    appUser.setState(BASIC_STATE); appUserDAO.save(appUser);
                 }
-            } catch (Exception e) {
-                log.error("Exception during call to converterService for {} '{}': {}", fileTypeDescription.toLowerCase(), originalFileName, e.getMessage(), e);
-                sendAnswer("Критична помилка сервісу конвертації для " + fileTypeDescription.toLowerCase() + " '" + originalFileName + "'.", chatId);
-            } finally {
-                appUser.setState(BASIC_STATE);
-                appUserDAO.save(appUser);
-                log.info("User {} state set back to BASIC_STATE after attempting file conversion.", telegramUserId);
+            } else { // Якщо це документ, але не DOCX і не фото
+                sendAnswer("Цей тип документа не підтримується для конвертації. Для аудіо, будь ласка, надішліть голосове повідомлення.", chatId);
+                // Не скидаємо стан, дозволяємо спробувати ще раз
             }
-            return;
-        }
-        else {
-            log.info("User {} sent a document, but not in AWAITING_FILE_FOR_CONVERSION state. Processing as regular document upload.", telegramUserId);
-            String permissionError = checkPermissionError(telegramUserId);
-            if (permissionError != null) {
-                sendAnswer(permissionError, chatId);
-                return;
-            }
-            // Видалено sendAnswer(FILE_RECEIVED_MESSAGE, chatId); щоб уникнути дублювання
+        } else { // Не в стані конвертації - обробка як звичайне завантаження документа
+            log.info("User {} sent a document (not for conversion).", telegramUserId);
+            // ... (існуюча логіка завантаження файлу)
+            String permissionError = checkPermissionError(appUser); // Передаємо AppUser
+            if (permissionError != null) { sendAnswer(permissionError, chatId); return; }
             try {
                 AppDocument doc = fileService.processDoc(message);
                 if (doc != null) {
                     String link = fileService.generateLink(doc.getId(), LinkType.GET_DOC);
-                    var answer = "Документ успішно завантажено! " // Змінено, щоб не дублювати "Файл отримано"
-                            + "Посилання для скачування: " + link;
-                    sendAnswer(answer, chatId);
-                } else {
-                    log.error("Document processing returned null for update: {}", update.getUpdateId());
-                    sendAnswer("Не вдалося обробити документ. Спробуйте пізніше.", chatId);
-                }
-            } catch (UploadFileException ex) {
-                log.error("UploadFileException occurred during doc processing: ", ex);
-                String error = "На жаль, завантаження файлу не вдалося. Спробуйте пізніше.";
-                sendAnswer(error, chatId);
+                    sendAnswer("Документ '" + doc.getDocName() + "' завантажено! Посилання: " + link, chatId);
+                } else { sendAnswer("Не вдалося обробити документ.", chatId); }
             } catch (Exception e) {
-                log.error("Exception occurred during doc processing: ", e);
-                String error = "Сталася непередбачена помилка під час обробки файлу.";
-                sendAnswer(error, chatId);
+                log.error("Error processing document for storage: {}", e.getMessage());
+                sendAnswer("Помилка при збереженні документа.", chatId);
             }
         }
     }
 
     @Override
-    @Transactional // Додано @Transactional
+    @Transactional
     public void processPhotoMessage(Update update) {
+        // Існуюча логіка для фото залишається практично без змін,
+        // оскільки вона вже коректно обробляє конвертацію фото в PNG
+        // та завантаження фото.
         saveRawData(update);
         var appUser = findOrSaveAppUser(update);
-        if (appUser == null) {
-            log.warn("Cannot process photo message for update {} as AppUser is null.", update.getUpdateId());
-            return;
-        }
+        if (appUser == null) return;
         log.info("ENTERING processPhotoMessage for user {}. Current state: {}", appUser.getTelegramUserId(), appUser.getState());
 
         var chatId = update.getMessage().getChatId();
@@ -348,172 +252,219 @@ public class MainServiceImpl implements MainService {
         Message message = update.getMessage();
 
         if (AWAITING_FILE_FOR_CONVERSION.equals(appUser.getState())) {
-            log.info("STATE IS AWAITING_FILE_FOR_CONVERSION - Proceeding with photo conversion logic for user {}", appUser.getTelegramUserId());
+            log.info("STATE IS AWAITING_FILE_FOR_CONVERSION (PhotoMessage) for user {}", telegramUserId);
+            if (!appUser.isActive()) {
+                sendAnswer("Будь ласка, активуйте свій акаунт.", chatId); return;
+            }
+            if (message.getPhoto() == null || message.getPhoto().isEmpty()) {
+                sendAnswer("Очікувалося фото.", chatId); return;
+            }
+
+            PhotoSize photoSize = message.getPhoto().stream().max(Comparator.comparing(PhotoSize::getFileSize)).orElse(null);
+            if (photoSize == null) {
+                sendAnswer("Не вдалося отримати дані фото.", chatId); return;
+            }
+
+            String fileId = photoSize.getFileId();
+            String originalFileName = "photo_" + telegramUserId + "_" + System.currentTimeMillis() + ".jpg"; // Фото не мають імені
+            byte[] fileData;
+            try {
+                fileData = fileService.downloadFileAsByteArray(fileId);
+                if (fileData == null || fileData.length == 0) throw new UploadFileException("Фото порожнє.");
+            } catch (Exception e) {
+                log.error("Failed to download photo for conversion: {}", e.getMessage());
+                sendAnswer("Не вдалося завантажити фото для конвертації.", chatId); return;
+            }
+
+            ByteArrayResource fileResource = new ByteArrayResource(fileData) {
+                @Override public String getFilename() { return originalFileName; }
+            };
+            String targetFormat = "png";
+            String converterApiEndpoint = "/api/convert"; // Ендпоінт для фото
+            sendAnswer("Фото '" + originalFileName + "' отримано. Конвертую в PNG...", chatId);
+
+            try {
+                ResponseEntity<byte[]> response = converterClientService.convertFile(fileResource, originalFileName, targetFormat, converterApiEndpoint);
+                if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                    byte[] convertedFileData = response.getBody();
+                    String baseName = originalFileName.substring(0, originalFileName.lastIndexOf('.'));
+                    String convertedFileName = "converted_" + baseName + "." + targetFormat;
+                    producerService.producerSendPhotoDTO(PhotoToSendDTO.builder()
+                            .chatId(chatId.toString()).photoBytes(convertedFileData).fileName(convertedFileName).caption("Сконвертовано: "+originalFileName).build());
+                    sendAnswer("Фото '" + originalFileName + "' успішно сконвертовано в PNG!", chatId);
+                } else {
+                    sendAnswer("Помилка конвертації фото. Статус: " + response.getStatusCode(), chatId);
+                }
+            } catch (Exception e) {
+                log.error("Exception during photo conversion call: {}", e.getMessage(), e);
+                sendAnswer("Критична помилка сервісу конвертації для фото.", chatId);
+            } finally {
+                appUser.setState(BASIC_STATE); appUserDAO.save(appUser);
+            }
+        } else { // Не для конвертації - звичайне завантаження фото
+            log.info("User {} sent a photo (not for conversion).", telegramUserId);
+            // ... (існуюча логіка завантаження фото)
+            String permissionError = checkPermissionError(appUser); // Передаємо AppUser
+            if (permissionError != null) { sendAnswer(permissionError, chatId); return; }
+            try {
+                AppPhoto photo = fileService.processPhoto(message);
+                if (photo != null) {
+                    String link = fileService.generateLink(photo.getId(), LinkType.GET_PHOTO);
+                    sendAnswer("Фото завантажено! Посилання: " + link, chatId);
+                } else { sendAnswer("Не вдалося обробити фото.", chatId); }
+            } catch (Exception e) {
+                log.error("Error processing photo for storage: {}", e.getMessage());
+                sendAnswer("Помилка при збереженні фото.", chatId);
+            }
+        }
+    }
+
+    // НОВИЙ КОД: Обробка голосових повідомлень
+    @Transactional
+    @Override
+    public void processVoiceMessage(Update update) {
+        saveRawData(update);
+        var appUser = findOrSaveAppUser(update);
+        if (appUser == null) {
+            log.warn("Cannot process voice message for update {} as AppUser is null.", update.getUpdateId());
+            return;
+        }
+        log.info("ENTERING processVoiceMessage for user {}. Current state: {}", appUser.getTelegramUserId(), appUser.getState());
+
+        var chatId = update.getMessage().getChatId();
+        var telegramUserId = appUser.getTelegramUserId();
+        Message message = update.getMessage();
+        Voice telegramVoice = message.getVoice();
+
+        if (telegramVoice == null) {
+            log.warn("Message for user {} was routed to processVoiceMessage, but Voice object is null.", telegramUserId);
+            sendAnswer("Очікувалося голосове повідомлення, але воно відсутнє.", chatId);
+            return;
+        }
+
+        if (AWAITING_FILE_FOR_CONVERSION.equals(appUser.getState())) {
+            log.info("STATE IS AWAITING_FILE_FOR_CONVERSION (VoiceMessage) for user {}", telegramUserId);
 
             if (!appUser.isActive()) {
                 sendAnswer("Будь ласка, активуйте свій акаунт перед конвертацією файлів.", chatId);
                 return;
             }
 
-            if (message.getPhoto() == null || message.getPhoto().isEmpty()) {
-                log.warn("User {} sent a message without a photo while in AWAITING_FILE_FOR_CONVERSION state.", telegramUserId);
-                sendAnswer("Очікувалося фото. Будь ласка, надішліть фото для конвертації в PNG або скасуйте операцію /cancel.", chatId);
-                return;
-            }
-
-            PhotoSize photoSize = message.getPhoto().stream()
-                    .max(Comparator.comparing(ps -> ps.getFileSize() != null ? ps.getFileSize() : 0))
-                    .orElse(null);
-
-            if (photoSize == null) {
-                log.error("No photo data found for conversion for user {}", telegramUserId);
-                sendAnswer("Не вдалося отримати дані фото для конвертації.", chatId);
-                return;
-            }
-
-            String fileId = photoSize.getFileId();
-            String originalFileName = "photo_" + telegramUserId + "_" + System.currentTimeMillis() + ".jpg"; // Припускаємо jpg
+            String originalFileName = "voice_" + telegramUserId + "_" + System.currentTimeMillis() + ".ogg"; // Голосові зазвичай .ogg (Opus)
+            String fileId = telegramVoice.getFileId();
             byte[] fileData;
 
             try {
                 fileData = fileService.downloadFileAsByteArray(fileId);
                 if (fileData == null || fileData.length == 0) {
-                    throw new UploadFileException("Завантажені дані фото порожні або відсутні.");
+                    throw new UploadFileException("Завантажені дані голосового повідомлення порожні.");
                 }
-                log.info("Successfully downloaded photo for conversion: FileID='{}', OriginalName='{}', Size={}", fileId, originalFileName, fileData.length);
-            } catch (UploadFileException e) {
-                log.error("Failed to download photo for conversion (fileId: {}) for user {}: {}", fileId, telegramUserId, e.getMessage());
-                sendAnswer("Не вдалося завантажити ваше фото для конвертації. Спробуйте ще раз або скасуйте /cancel.", chatId);
-                return;
+                log.info("Successfully downloaded voice for conversion: FileID='{}', GeneratedName='{}', Size={}", fileId, originalFileName, fileData.length);
             } catch (Exception e) {
-                log.error("Unexpected error downloading photo for conversion (fileId: {}) for user {}: {}", fileId, telegramUserId, e.getMessage(), e);
-                sendAnswer("Сталася непередбачена помилка під час завантаження вашого фото. Спробуйте ще раз або скасуйте /cancel.", chatId);
+                log.error("Failed to download voice for conversion (fileId: {}) for user {}: {}", fileId, telegramUserId, e.getMessage(), e);
+                sendAnswer("Не вдалося завантажити ваше голосове повідомлення для конвертації. Спробуйте ще раз або /cancel.", chatId);
                 return;
             }
 
-            String targetFormat = "png";
-            String converterApiEndpoint = "/api/convert";
-
+            final String finalOriginalFileName = originalFileName;
             ByteArrayResource fileResource = new ByteArrayResource(fileData) {
                 @Override
                 public String getFilename() {
-                    return originalFileName;
+                    return finalOriginalFileName;
                 }
             };
 
-            sendAnswer("Фото '" + originalFileName + "' отримано. Розпочинаю конвертацію в " + targetFormat.toUpperCase() + "...", chatId);
+            String targetFormat = TARGET_VOICE_CONVERT_FORMAT; // "mp3"
+            String converterApiEndpoint = "/api/audio/convert"; // Ендпоінт для аудіо в converter-service
+
+            sendAnswer("Голосове '" + finalOriginalFileName + "' отримано. Конвертую в " + targetFormat.toUpperCase() + "...", chatId);
 
             try {
-                ResponseEntity<byte[]> response = converterClientService.convertFile(fileResource, originalFileName, targetFormat, converterApiEndpoint);
+                ResponseEntity<byte[]> response = converterClientService.convertAudioFile(fileResource, finalOriginalFileName, targetFormat, converterApiEndpoint);
 
                 if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
                     byte[] convertedFileData = response.getBody();
-                    log.info("Photo '{}' successfully converted to {}. Size: {} bytes. Preparing to send to user...", originalFileName, targetFormat, convertedFileData.length);
+                    log.info("Voice message '{}' successfully converted to {}. Size: {} bytes.", finalOriginalFileName, targetFormat, convertedFileData.length);
 
-                    String baseName = originalFileName.contains(".") ? originalFileName.substring(0, originalFileName.lastIndexOf('.')) : originalFileName;
-                    String convertedFileName = "converted_" + baseName + "." + targetFormat;
+                    String baseName = finalOriginalFileName.substring(0, finalOriginalFileName.lastIndexOf('.'));
+                    String convertedFileNameWithExt = "converted_" + baseName + "." + targetFormat;
 
-                    PhotoToSendDTO photoDTO = PhotoToSendDTO.builder()
+                    AudioToSendDTO audioDTO = AudioToSendDTO.builder()
                             .chatId(chatId.toString())
-                            .photoBytes(convertedFileData)
-                            .fileName(convertedFileName)
+                            .audioBytes(convertedFileData)
+                            .fileName(convertedFileNameWithExt)
+                            .caption("Сконвертоване голосове: " + finalOriginalFileName)
                             .build();
-
-                    producerService.producerSendPhotoDTO(photoDTO);
-                    log.info("Sent PhotoToSendDTO to producer for chat_id: {}", chatId);
-
-                    // ТІЛЬКИ ОДНЕ ПОВІДОМЛЕННЯ ПРО УСПІХ
-                    sendAnswer("Фото '" + originalFileName + "' успішно сконвертовано в " + targetFormat.toUpperCase() + " та поставлено в чергу на відправку!", chatId);
-
+                    producerService.producerSendAudioDTO(audioDTO);
+                    sendAnswer("Голосове повідомлення успішно сконвертовано в " + targetFormat.toUpperCase() + "!", chatId);
                 } else {
-                    String errorDetails = response.getBody() != null ? new String(response.getBody()) : "Немає деталей";
-                    log.error("Failed to convert photo '{}'. Status: {}. Details: {}", originalFileName, response.getStatusCode(), errorDetails);
-                    sendAnswer("На жаль, сталася помилка під час конвертації фото '" + originalFileName + "'.", chatId);
+                    String errorDetails = (response.getBody() != null) ? new String(response.getBody()) : "Немає деталей";
+                    log.error("Failed to convert voice. Status: {}. Details: {}", response.getStatusCode(), errorDetails);
+                    sendAnswer("Помилка конвертації голосового повідомлення. Статус: " + response.getStatusCode(), chatId);
                 }
             } catch (Exception e) {
-                log.error("Exception during call to converterService for photo '{}': {}", originalFileName, e.getMessage(), e);
-                sendAnswer("Критична помилка сервісу конвертації для фото '" + originalFileName + "'.", chatId);
+                log.error("Critical exception during voice conversion call: {}", e.getMessage(), e);
+                sendAnswer("Критична помилка сервісу конвертації для голосового повідомлення.", chatId);
             } finally {
                 appUser.setState(BASIC_STATE);
                 appUserDAO.save(appUser);
-                log.info("User {} state set back to BASIC_STATE after attempting photo conversion.", telegramUserId);
+                log.info("User {} state set back to BASIC_STATE after voice conversion attempt.", telegramUserId);
             }
-            return;
-        }
-        else {
-            log.info("User {} sent a photo, but not in AWAITING_FILE_FOR_CONVERSION state. Processing as regular photo upload.", telegramUserId);
-            String permissionError = checkPermissionError(telegramUserId);
-            if (permissionError != null) {
-                sendAnswer(permissionError, chatId);
-                return;
-            }
-            // Видалено sendAnswer(FILE_RECEIVED_MESSAGE, chatId);
-            try {
-                AppPhoto photo = fileService.processPhoto(message);
-                if (photo != null) {
-                    String link = fileService.generateLink(photo.getId(), LinkType.GET_PHOTO);
-                    var answer = "Фото успішно завантажено! " // Змінено
-                            + "Посилання для скачування: " + link;
-                    sendAnswer(answer, chatId);
-                } else {
-                    log.error("Photo processing returned null for update: {}", update.getUpdateId());
-                    sendAnswer("Не вдалося обробити фото. Спробуйте пізніше.", chatId);
-                }
-            } catch (UploadFileException ex) {
-                log.error("UploadFileException occurred during photo processing: ", ex);
-                String error = "На жаль, завантаження фото не вдалося. Спробуйте пізніше.";
-                sendAnswer(error, chatId);
-            } catch (Exception e) {
-                log.error("Exception occurred during photo processing: ", e);
-                String error = "Сталася непередбачена помилка під час обробки фото.";
-                sendAnswer(error, chatId);
-            }
+        } else {
+            log.info("User {} sent a voice message, but not in AWAITING_FILE_FOR_CONVERSION state.", telegramUserId);
+            // Якщо потрібно, тут можна додати логіку збереження голосового повідомлення (поза конвертацією)
+            sendAnswer("Голосове повідомлення отримано, але зараз не очікую файли для конвертації.", chatId);
         }
     }
 
-    private String removeExtension(String filename) {
-        if (filename == null) return "converted-file";
-        int lastDot = filename.lastIndexOf('.');
-        if (lastDot == -1) {
-            return filename;
+    // Метод processAudioMessage (для файлів, надісланих як Audio, а не Voice)
+    // Для "хардкоду" на голосові, цей метод поки що може просто інформувати.
+    @Transactional
+    @Override
+    public void processAudioMessage(Update update) {
+        saveRawData(update);
+        var appUser = findOrSaveAppUser(update);
+        if (appUser == null) return;
+        var chatId = update.getMessage().getChatId();
+        log.info("ENTERING processAudioMessage for user {}. Current state: {}", appUser.getTelegramUserId(), appUser.getState());
+
+        if (AWAITING_FILE_FOR_CONVERSION.equals(appUser.getState())) {
+            sendAnswer("Для конвертації аудіо, будь ласка, надішліть саме голосове повідомлення.", chatId);
+        } else {
+            sendAnswer("Аудіофайл отримано, але зараз не очікую файли для конвертації.", chatId);
+            // Тут можна додати логіку збереження аудіофайлу, якщо потрібно.
         }
-        return filename.substring(0, lastDot);
     }
 
+    // Змінив параметр на AppUser для уникнення повторного запиту до БД
     @Transactional(readOnly = true)
-    protected String checkPermissionError(Long telegramUserId) {
-        if (telegramUserId == null) {
-            log.error("checkPermissionError called with null telegramUserId");
+    protected String checkPermissionError(AppUser appUser) { // ЗМІНЕНО ПАРАМЕТР
+        if (appUser == null) { // Малоймовірно, якщо викликається після findOrSaveAppUser
+            log.error("checkPermissionError called with null appUser");
             return "Помилка: не вдалося визначити користувача.";
         }
-        Optional<AppUser> optionalAppUser = appUserDAO.findByTelegramUserId(telegramUserId);
-        if (optionalAppUser.isEmpty()) {
-            log.error("User not found in checkPermissionError for telegramUserId: {}", telegramUserId);
-            return "Помилка: користувач не знайдений.";
-        }
-        AppUser appUser = optionalAppUser.get();
         var userState = appUser.getState();
         log.debug("Checking permissions for user ID: {}, isActive: {}, state: {}", appUser.getId(), appUser.isActive(), userState);
         if (!appUser.isActive()) {
-            log.warn("Permission denied for user {}: not active.", telegramUserId);
+            log.warn("Permission denied for user {}: not active.", appUser.getTelegramUserId());
             if (WAIT_FOR_EMAIL_STATE.equals(userState)) {
-                return "Будь ласка, завершіть реєстрацію, активувавши обліковий запис через email, перед завантаженням файлів.";
+                return "Будь ласка, завершіть реєстрацію, активувавши обліковий запис через email.";
             } else {
-                return "Зареєструйтесь (/registration) або активуйте "
-                        + "свій обліковий запис для завантаження контенту.";
+                return "Зареєструйтесь (/registration) або активуйте свій обліковий запис.";
             }
         }
-        else if (!BASIC_STATE.equals(userState) && !AWAITING_FILE_FOR_CONVERSION.equals(userState)) {
-            log.warn("Permission denied for user {}: is active but not in BASIC_STATE or AWAITING_FILE_FOR_CONVERSION (current state: {}).", telegramUserId, userState);
-            return "Скасуйте поточну команду за допомогою /cancel для надсилання файлів.";
-        }
-        log.debug("Permission granted for user {}", telegramUserId);
-        return null;
+        // Дозволяємо тільки з BASIC_STATE або AWAITING_FILE_FOR_CONVERSION для завантаження/конвертації
+        // Цю перевірку тепер можна уточнити в кожному processXMessage методі, якщо потрібно
+        // if (!BASIC_STATE.equals(userState) && !AWAITING_FILE_FOR_CONVERSION.equals(userState)) {
+        //     log.warn("User {} is active but not in a state to send files (current: {}).", appUser.getTelegramUserId(), userState);
+        //     return "Скасуйте поточну команду (/cancel) для надсилання файлів.";
+        // }
+        return null; // Дозвіл надано
     }
 
     private void sendAnswer(String output, Long chatId) {
         if (output == null || output.isEmpty()) {
-            log.warn("Attempted to send null or empty message to chat ID: " + chatId);
+            log.warn("Attempted to send null or empty message to chat ID: {}", chatId);
             return;
         }
         SendMessage sendMessage = new SendMessage();
@@ -523,82 +474,74 @@ public class MainServiceImpl implements MainService {
     }
 
     private String processServiceCommand(AppUser appUser, String cmd) {
-        var serviceCommand = ServiceCommand.fromValue(cmd);
+        ServiceCommand serviceCommand = ServiceCommand.fromValue(cmd);
         if (serviceCommand == null) {
-            // Дозволяємо /help, /start з будь-якого стану, якщо це не спеціальна обробка
-            log.debug("Received non-command text '{}' from user {} in state {}", cmd, appUser.getTelegramUserId(), appUser.getState());
-            return "Невідома команда! Щоб переглянути список доступних команд, введіть /help";
+            return "Невідома команда! Щоб побачити список команд, введіть /help";
         }
         switch (serviceCommand) {
             case REGISTRATION:
-                if (WAIT_FOR_EMAIL_STATE.equals(appUser.getState()) || EMAIL_CONFIRMED_STATE.equals(appUser.getState())) {
-                    return "Ви вже в процесі реєстрації або ваш email підтверджено. Якщо хочете змінити email, зверніться до підтримки.";
+                if (appUser.getState() == WAIT_FOR_EMAIL_STATE || appUser.getState() == EMAIL_CONFIRMED_STATE || appUser.isActive()){
+                    return "Ви вже зареєстровані або в процесі реєстрації.";
                 }
                 return appUserService.registerUser(appUser);
             case HELP:
                 return help();
             case START:
-                return "Вітаю! Щоб переглянути список доступних команд, введіть /help";
+                return "Вітаю! Я бот для конвертації та збереження файлів. Введіть /help для списку команд.";
+            case CANCEL: // Додано обробку CANCEL тут
+                return cancelProcess(appUser);
             default:
-                log.warn("Command {} recognized but not handled in processServiceCommand for user state {}", serviceCommand, appUser.getState());
-                return "Невідома команда! Щоб переглянути список доступних команд, введіть /help";
+                log.warn("Command {} not handled in processServiceCommand for user state {}", serviceCommand, appUser.getState());
+                return "Невідома команда. Введіть /help.";
         }
     }
 
     private String help() {
+        // ЗМІНЕНО: Оновлено help
         return "Список доступних команд:\n"
-                + "/cancel - скасування виконання поточної команди;\n"
+                + "/cancel - скасування поточної команди;\n"
                 + "/registration - реєстрація користувача;\n"
-                + "/resend_email - повторно надіслати лист активації (якщо ви в процесі реєстрації);\n"
-                + "/convert_file - розпочати процес конвертації файлу (фото в PNG, DOCX в PDF).";
+                + "/resend_email - повторно надіслати лист активації;\n"
+                + "/convert_file - конвертувати файл (DOCX в PDF, фото в PNG, голосове в MP3).";
     }
 
     @Transactional
-    protected String cancelProcess(AppUser appUser) { // Змінено на protected, якщо не використовується поза пакетом
+    protected String cancelProcess(AppUser appUser) {
         appUser.setState(BASIC_STATE);
         appUserDAO.save(appUser);
         log.info("User {} cancelled operation, state set to BASIC_STATE", appUser.getTelegramUserId());
-        return "Команду скасовано!";
+        return "Команду скасовано! Поточну операцію перервано.";
     }
 
-    @Transactional // Додано @Transactional
-    protected AppUser findOrSaveAppUser(Update update) { // Змінено на protected
+    @Transactional
+    protected AppUser findOrSaveAppUser(Update update) {
         if (update == null || update.getMessage() == null) {
-            log.error("Update or message is null in findOrSaveAppUser");
-            return null;
+            log.error("Update or message is null in findOrSaveAppUser"); return null;
         }
         User telegramUser = update.getMessage().getFrom();
         if (telegramUser == null) {
-            log.error("Update received without user info: {}", update.getUpdateId());
-            return null;
+            log.error("Update received without user info: {}", update.getUpdateId()); return null;
         }
-        Optional<AppUser> optionalAppUser = appUserDAO.findByTelegramUserId(telegramUser.getId());
-        if (optionalAppUser.isEmpty()) {
-            log.info("Creating new AppUser for telegram user_id: {}", telegramUser.getId());
-            AppUser transientAppUser = AppUser.builder()
-                    .telegramUserId(telegramUser.getId())
-                    .userName(telegramUser.getUserName())
-                    .firstName(telegramUser.getFirstName())
-                    .lastName(telegramUser.getLastName())
-                    .isActive(false) // За замовчуванням неактивний
-                    .state(BASIC_STATE)
-                    .build();
-            return appUserDAO.save(transientAppUser);
-        } else {
-            AppUser existingUser = optionalAppUser.get();
-            log.debug("Found existing AppUser with ID: {} for telegram user_id: {}", existingUser.getId(), telegramUser.getId());
-            return existingUser;
-        }
+        return appUserDAO.findByTelegramUserId(telegramUser.getId())
+                .orElseGet(() -> {
+                    log.info("Creating new AppUser for telegram user_id: {}", telegramUser.getId());
+                    AppUser transientAppUser = AppUser.builder()
+                            .telegramUserId(telegramUser.getId())
+                            .userName(telegramUser.getUserName())
+                            .firstName(telegramUser.getFirstName())
+                            .lastName(telegramUser.getLastName())
+                            .isActive(false)
+                            .state(BASIC_STATE)
+                            .build();
+                    return appUserDAO.save(transientAppUser);
+                });
     }
 
     private void saveRawData(Update update) {
         if (update == null || update.getUpdateId() == null) {
-            log.warn("Attempted to save null or invalid Update object.");
-            return;
+            log.warn("Attempted to save null or invalid Update object."); return;
         }
-        RawData rawData = RawData.builder()
-                .event(update)
-                .build();
+        RawData rawData = RawData.builder().event(update).build();
         rawDataDAO.save(rawData);
     }
 }

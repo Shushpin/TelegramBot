@@ -1,5 +1,6 @@
 package lnu.study.service.impl;
 
+import lnu.study.dto.AudioToSendDTO;
 import lnu.study.dto.DocumentToSendDTO;
 import lnu.study.dto.PhotoToSendDTO;
 import lnu.study.service.ProducerService;
@@ -49,6 +50,12 @@ public class ProducerServiceImpl implements ProducerService {
     @Override
     public void producerSendDocumentDTO(DocumentToSendDTO documentToSendDTO) {
         rabbitTemplate.convertAndSend(ANSWER_MESSAGE, documentToSendDTO);
+    }
+
+    @Override
+    public void producerSendAudioDTO(AudioToSendDTO audioToSendDTO) {
+
+        rabbitTemplate.convertAndSend(ANSWER_MESSAGE, audioToSendDTO);
     }
     // Якщо б ви обрали один загальний метод:
     /*

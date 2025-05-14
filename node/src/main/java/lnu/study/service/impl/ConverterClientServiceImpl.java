@@ -18,9 +18,14 @@ public class ConverterClientServiceImpl implements ConverterClientService {
     @Value("${service.converter.uri}")
     private String converterServiceBaseUri;
 
+    private final RestTemplate restTemplate;
+
+    public ConverterClientServiceImpl(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
+
     @Override
     public ResponseEntity<byte[]> convertFile(ByteArrayResource fileResource, String originalFileName, String targetFormat, String converterApiEndpoint) {
-        RestTemplate restTemplate = new RestTemplate();
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
 
@@ -52,4 +57,36 @@ public class ConverterClientServiceImpl implements ConverterClientService {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
+
+    @Override
+    public ResponseEntity<byte[]> convertAudioFile(ByteArrayResource fileResource, String originalFilename, String targetFormat, String converterApiEndpoint) {
+        String apiEndpoint = "/api/audio/convert"; // Специфічний ендпоінт для аудіо
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        // Переконайтеся, що ByteArrayResource має правильне ім'я файлу для multipart обробки.
+        // Ваш AudioConverterController використовує file.getOriginalFilename(), що надходить від MultipartFile.
+        // Наш ByteArrayResource повинен мати правильно встановлене getFilename().
+        body.add("file", fileResource); // fileResource.getFilename() повинен бути originalFilename
+        body.add("format", targetFormat);
+
+        HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+        String url = converterServiceBaseUri + converterApiEndpoint;
+
+        log.info("Sending audio conversion request to URL: {} for file: {}, target format: {}", url, fileResource.getFilename(), targetFormat);
+        try {
+            ResponseEntity<byte[]> response = restTemplate.exchange(url, HttpMethod.POST, requestEntity, byte[].class);
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                log.error("Audio conversion failed at {}. Status: {}. Response body: {}", url, response.getStatusCode(), response.hasBody() ? new String(response.getBody()) : "No body");
+            }
+            return response;
+        } catch (Exception e) {
+            log.error("Error calling audio converter service at {}: {}", url, e.getMessage(), e);
+            byte[] errorBody = ("Failed to connect to audio conversion service: " + e.getMessage()).getBytes();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorBody);
+        }
+    }
+
 }

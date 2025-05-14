@@ -1,5 +1,6 @@
 package lnu.study.service;
 
+import lnu.study.dto.AudioToSendDTO;
 import lnu.study.dto.DocumentToSendDTO;
 import lnu.study.dto.PhotoToSendDTO;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument; // <<< НОВИЙ ІМПОРТ
@@ -18,6 +19,8 @@ public interface ProducerService {
     void producerSendPhotoDTO(PhotoToSendDTO photoToSendDTO);
 
     void producerSendDocumentDTO(DocumentToSendDTO documentToSendDTO);// <<< НОВИЙ МЕТОД
+
+    void producerSendAudioDTO(AudioToSendDTO audioToSendDTO); // Новий метод
 
     // Альтернативно, один більш загальний метод, якщо хочете:
     // void producerSendBotApiMethod(org.telegram.telegrambots.meta.api.methods.BotApiMethod<?> method);

@@ -113,4 +113,16 @@ public class TelegramBot extends TelegramWebhookBot {
             log.debug("Successfully executed SendPhoto to chat_id: {}", sendPhoto.getChatId());
         } catch (TelegramApiException e) { }
     }
+    public void sendSpecificAudio(org.telegram.telegrambots.meta.api.methods.send.SendAudio sendAudio) { // Додаємо імпорт, якщо потрібно
+        if (sendAudio == null) {
+            log.warn("Attempted to send null SendAudio object.");
+            return;
+        }
+        try {
+            execute(sendAudio);
+            log.debug("Successfully executed SendAudio to chat_id: {}", sendAudio.getChatId());
+        } catch (TelegramApiException e) {
+            log.error("Error executing SendAudio to chat_id {}: {}", sendAudio.getChatId(), e.getMessage(), e);
+        }
+    }
 }

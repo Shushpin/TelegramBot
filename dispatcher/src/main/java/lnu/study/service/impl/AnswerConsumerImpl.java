@@ -2,19 +2,21 @@ package lnu.study.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lnu.study.controller.UpdateProcessor;
+import lnu.study.dto.AudioToSendDTO;
 import lnu.study.dto.DocumentToSendDTO;
-import lnu.study.dto.PhotoToSendDTO; // <<< НОВИЙ ІМПОРТ
+import lnu.study.dto.PhotoToSendDTO;
 import lnu.study.service.AnswerConsumer;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Service;
+import org.telegram.telegrambots.meta.api.methods.send.SendAudio;   // Потрібен цей імпорт
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
-import org.telegram.telegrambots.meta.api.objects.InputFile; // <<< НОВИЙ ІМПОРТ
+import org.telegram.telegrambots.meta.api.objects.InputFile;
 
-import java.io.ByteArrayInputStream; // <<< НОВИЙ ІМПОРТ
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 
 import static lnu.study.model.RabbitQueue.ANSWER_MESSAGE;
@@ -52,39 +54,47 @@ public class AnswerConsumerImpl implements AnswerConsumer {
             byte[] body = message.getBody();
             if (typeId.equals(SendMessage.class.getName())) {
                 SendMessage sendMessage = objectMapper.readValue(body, SendMessage.class);
-                log.debug("Successfully deserialized message to SendMessage. Text: '{}'", sendMessage.getText());
-                updateProcessor.setView(sendMessage); // Тільки ОДИН виклик для SendMessage
+                log.debug("Successfully deserialized to SendMessage. Text: '{}'", sendMessage.getText());
+                updateProcessor.setView(sendMessage);
             } else if (typeId.equals(PhotoToSendDTO.class.getName())) {
                 PhotoToSendDTO photoDTO = objectMapper.readValue(body, PhotoToSendDTO.class);
-                log.debug("Successfully deserialized message to PhotoToSendDTO for chatId: {}. Filename: {}", photoDTO.getChatId(), photoDTO.getFileName());
+                log.debug("Deserialized PhotoToSendDTO: {}", photoDTO.getFileName());
 
-                SendPhoto newSendPhoto = new SendPhoto();
-                newSendPhoto.setChatId(photoDTO.getChatId());
-                // Переконайтесь, що photoDTO.getPhotoBytes() повертає коректний масив байтів
-                InputFile inputFilePhoto = new InputFile(new ByteArrayInputStream(photoDTO.getPhotoBytes()), photoDTO.getFileName());
-                newSendPhoto.setPhoto(inputFilePhoto);
+                SendPhoto sendPhoto = new SendPhoto();
+                sendPhoto.setChatId(photoDTO.getChatId());
+                sendPhoto.setPhoto(new InputFile(new ByteArrayInputStream(photoDTO.getPhotoBytes()), photoDTO.getFileName()));
                 if (photoDTO.getCaption() != null && !photoDTO.getCaption().isEmpty()) {
-                    newSendPhoto.setCaption(photoDTO.getCaption());
+                    sendPhoto.setCaption(photoDTO.getCaption());
                 }
-                log.debug("Created new SendPhoto object. Attempting to send via UpdateProcessor.");
-                updateProcessor.setView(newSendPhoto);
+                updateProcessor.setView(sendPhoto); // ВИПРАВЛЕНО: викликаємо setView(SendPhoto)
             } else if (typeId.equals(DocumentToSendDTO.class.getName())) {
                 DocumentToSendDTO documentDTO = objectMapper.readValue(body, DocumentToSendDTO.class);
-                log.debug("Successfully deserialized message to DocumentToSendDTO for chatId: {}. Filename: {}", documentDTO.getChatId(), documentDTO.getFileName());
+                log.debug("Deserialized DocumentToSendDTO: {}", documentDTO.getFileName());
 
-                SendDocument newSendDocument = new SendDocument();
-                newSendDocument.setChatId(documentDTO.getChatId());
-                // Переконайтесь, що documentDTO.getDocumentBytes() повертає коректний масив байтів
-                InputFile inputFileDoc = new InputFile(new ByteArrayInputStream(documentDTO.getDocumentBytes()), documentDTO.getFileName());
-                newSendDocument.setDocument(inputFileDoc);
+                SendDocument sendDocument = new SendDocument();
+                sendDocument.setChatId(documentDTO.getChatId());
+                sendDocument.setDocument(new InputFile(new ByteArrayInputStream(documentDTO.getDocumentBytes()), documentDTO.getFileName()));
                 if (documentDTO.getCaption() != null && !documentDTO.getCaption().isEmpty()) {
-                    newSendDocument.setCaption(documentDTO.getCaption());
+                    sendDocument.setCaption(documentDTO.getCaption());
                 }
-                log.debug("Created new SendDocument object. Attempting to send via UpdateProcessor.");
-                updateProcessor.setView(newSendDocument);
+                updateProcessor.setView(sendDocument); // ВИПРАВЛЕНО: викликаємо setView(SendDocument)
+            } else if (typeId.equals(AudioToSendDTO.class.getName())) { // <<< НОВИЙ БЛОК, ВИПРАВЛЕНИЙ
+                AudioToSendDTO audioDTO = objectMapper.readValue(body, AudioToSendDTO.class);
+                log.debug("Deserialized AudioToSendDTO: {}", audioDTO.getFileName());
+
+                SendAudio sendAudio = new SendAudio();
+                sendAudio.setChatId(audioDTO.getChatId());
+                sendAudio.setAudio(new InputFile(new ByteArrayInputStream(audioDTO.getAudioBytes()), audioDTO.getFileName()));
+                if (audioDTO.getCaption() != null && !audioDTO.getCaption().isEmpty()) {
+                    sendAudio.setCaption(audioDTO.getCaption());
+                }
+                // Тут можна додати інші параметри для SendAudio, якщо вони є в DTO (duration, performer, title)
+                // sendAudio.setDuration(audioDTO.getDuration());
+                // sendAudio.setPerformer(audioDTO.getPerformer());
+                // sendAudio.setTitle(audioDTO.getTitle());
+
+                updateProcessor.setView(sendAudio); // ВИПРАВЛЕНО: викликаємо setView(SendAudio)
             }
-            // Видаліть застарілі блоки для SendDocument.class.getName() та SendPhoto.class.getName(), якщо вони більше не потрібні.
-            // Наприклад, якщо SendPhoto.class.getName() більше не використовується, його блок теж можна прибрати.
             else {
                 log.warn("Received message with unhandled or unexpected __TypeId__: {}. Body preview: {}", typeId, new String(body).substring(0, Math.min(100, body.length)));
             }

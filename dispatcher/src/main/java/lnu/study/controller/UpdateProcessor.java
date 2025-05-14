@@ -1,5 +1,6 @@
 package lnu.study.controller;
 
+import lnu.study.dto.AudioToSendDTO;
 import lnu.study.service.UpdateProducer;
 import lnu.study.utils.MessageUtils;
 import lombok.extern.log4j.Log4j2;
@@ -59,6 +60,8 @@ public class UpdateProcessor {
         } else if (message.hasText()) {
             log.info("Processing text message from chat_id: {}: '{}'", message.getChat().getId(), message.getText());
             processTextMessage(update);
+        } else if (message.hasVoice()) { // ПЕРЕД іншими, більш загальними перевірками типу файлу
+            processVoiceMessage(update);
         } else {
             log.warn("Unsupported message content type from chat_id: {}", message.getChat().getId());
             setUnsupportedMessageTypeView(update);
@@ -83,6 +86,9 @@ public class UpdateProcessor {
             log.error("UpdateProcessor: CRITICAL - TelegramBot instance is NULL. Cannot send message to chat_id: {}", sendMessage.getChatId());
             throw new IllegalStateException("TelegramBot instance is null in UpdateProcessor. Cannot send message.");
         }
+    }
+    private void processVoiceMessage(Update update) {
+        updateProducer.produceVoiceMessage(update); // Використовуємо новий метод продюсера
     }
 
     private void processPhotoMessage(Update update) {
@@ -119,4 +125,16 @@ public class UpdateProcessor {
             log.error("UpdateProcessor: CRITICAL - TelegramBot instance is NULL. Cannot send SendPhoto to chat_id: {}", sendPhoto.getChatId());
         }
     }
+    public void setView(org.telegram.telegrambots.meta.api.methods.send.SendAudio sendAudio) { // Додаємо імпорт, якщо потрібно
+        log.debug("UpdateProcessor: Attempting to send SendAudio via TelegramBot to chat_id: {}", sendAudio.getChatId());
+        if (this.telegramBot != null) {
+            telegramBot.sendSpecificAudio(sendAudio); // Виклик нового методу в TelegramBot
+            log.info("UpdateProcessor: SendAudio passed to TelegramBot for chat_id: {}", sendAudio.getChatId());
+        } else {
+            log.error("UpdateProcessor: CRITICAL - TelegramBot instance is NULL. Cannot send SendAudio to chat_id: {}", sendAudio.getChatId());
+            // Можливо, варто кидати виняток, якщо telegramBot є null, щоб швидше виявити проблему
+            // throw new IllegalStateException("TelegramBot instance is null in UpdateProcessor. Cannot send SendAudio.");
+        }
+    }
+
 }
