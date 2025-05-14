@@ -1,13 +1,16 @@
 package lnu.study.controller;
 
 import jakarta.annotation.PostConstruct;
+import lnu.study.dto.VideoToSendDTO;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramWebhookBot;
 import org.telegram.telegrambots.meta.api.methods.BotApiMethod;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.send.SendVideo;
 import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
+import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.apache.logging.log4j.Logger;
@@ -15,6 +18,8 @@ import org.apache.logging.log4j.LogManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
+
+import java.io.ByteArrayInputStream;
 import java.io.Serializable;
 
 @Component
@@ -125,4 +130,23 @@ public class TelegramBot extends TelegramWebhookBot {
             log.error("Error executing SendAudio to chat_id {}: {}", sendAudio.getChatId(), e.getMessage(), e);
         }
     }
+    public void sendVideo(VideoToSendDTO dto) {
+        SendVideo sendVideo = new SendVideo();
+        sendVideo.setChatId(dto.getChatId());
+        sendVideo.setVideo(new InputFile(new ByteArrayInputStream(dto.getVideoBytes()), dto.getFileName()));
+        if (dto.getCaption() != null && !dto.getCaption().isEmpty()) {
+            sendVideo.setCaption(dto.getCaption());
+        }
+        if (dto.getDuration() != null) sendVideo.setDuration(dto.getDuration());
+        if (dto.getWidth() != null) sendVideo.setWidth(dto.getWidth());
+        if (dto.getHeight() != null) sendVideo.setHeight(dto.getHeight());
+        // sendVideo.setSupportsStreaming(true); // Можна додати, якщо потрібно
+
+        try {
+            execute(sendVideo);
+            log.debug("Video DTO sent to chat_id: {}", dto.getChatId());
+        } catch (TelegramApiException e) {
+            log.error("Failed to send Video DTO to chat_id {}: {}", dto.getChatId(), e.getMessage(), e);
+        }
+}
 }

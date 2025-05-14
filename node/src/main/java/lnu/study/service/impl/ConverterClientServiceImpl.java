@@ -88,5 +88,41 @@ public class ConverterClientServiceImpl implements ConverterClientService {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorBody);
         }
     }
+    @Override
+    public ResponseEntity<byte[]> convertVideoFile(ByteArrayResource fileResource, String originalFilename, String targetFormat, String converterApiEndpoint) {
+        // converterApiEndpoint для відео буде, наприклад, "/api/video/convert"
+        // Цей метод може бути майже ідентичним до convertFile, передаючи правильний endpoint.
+        // Або можна просто використовувати convertFile, якщо логіка формування запиту однакова.
+        // Для ясності, якщо це окремий метод:
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        body.add("file", fileResource); // fileResource.getFilename() має бути встановлено правильно
+        body.add("format", targetFormat);
+
+        HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+        String fullUri = converterServiceBaseUri + converterApiEndpoint;
+
+        log.info("Sending video file '{}' to converter service. URI: {}, Target format: {}", originalFilename, fullUri, targetFormat);
+
+        try {
+            return this.restTemplate.exchange(
+                    fullUri,
+                    HttpMethod.POST,
+                    requestEntity,
+                    byte[].class
+            );
+        } catch (HttpStatusCodeException e) {
+            log.error("Error calling converter service for video file '{}': {} - {}. Response body: {}",
+                    originalFilename, e.getStatusCode(), e.getMessage(), e.getResponseBodyAsString(), e);
+            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsByteArray());
+        } catch (Exception e) {
+            log.error("Generic error calling converter service for video file '{}': {}", originalFilename, e.getMessage(), e);
+            String errorMsg = "Error communicating with video converter service: " + e.getMessage();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorMsg.getBytes());
+        }
+    }
 
 }

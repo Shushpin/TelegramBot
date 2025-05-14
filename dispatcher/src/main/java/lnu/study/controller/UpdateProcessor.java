@@ -1,6 +1,7 @@
 package lnu.study.controller;
 
 import lnu.study.dto.AudioToSendDTO;
+import lnu.study.dto.VideoToSendDTO;
 import lnu.study.service.UpdateProducer;
 import lnu.study.utils.MessageUtils;
 import lombok.extern.log4j.Log4j2;
@@ -134,6 +135,15 @@ public class UpdateProcessor {
             log.error("UpdateProcessor: CRITICAL - TelegramBot instance is NULL. Cannot send SendAudio to chat_id: {}", sendAudio.getChatId());
             // Можливо, варто кидати виняток, якщо telegramBot є null, щоб швидше виявити проблему
             // throw new IllegalStateException("TelegramBot instance is null in UpdateProcessor. Cannot send SendAudio.");
+        }
+    }
+    public void sendVideo(VideoToSendDTO dto) {
+        log.debug("UpdateProcessor: Attempting to send VideoToSendDTO via TelegramBot to chat_id: {}", dto.getChatId());
+        if (this.telegramBot != null) {
+            telegramBot.sendVideo(dto);
+            log.info("UpdateProcessor: VideoToSendDTO passed to TelegramBot for chat_id: {}", dto.getChatId());
+        } else {
+            log.error("UpdateProcessor: CRITICAL - TelegramBot instance is NULL. Cannot send VideoToSendDTO to chat_id: {}", dto.getChatId());
         }
     }
 

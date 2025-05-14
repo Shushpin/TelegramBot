@@ -5,6 +5,7 @@ import lnu.study.controller.UpdateProcessor;
 import lnu.study.dto.AudioToSendDTO;
 import lnu.study.dto.DocumentToSendDTO;
 import lnu.study.dto.PhotoToSendDTO;
+import lnu.study.dto.VideoToSendDTO;
 import lnu.study.service.AnswerConsumer;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.amqp.core.Message;
@@ -94,6 +95,11 @@ public class AnswerConsumerImpl implements AnswerConsumer {
                 // sendAudio.setTitle(audioDTO.getTitle());
 
                 updateProcessor.setView(sendAudio); // ВИПРАВЛЕНО: викликаємо setView(SendAudio)
+            }
+            else if (typeId.equals(VideoToSendDTO.class.getName())) { // <<< НОВИЙ БЛОК
+                VideoToSendDTO videoDTO = objectMapper.readValue(body, VideoToSendDTO.class);
+                log.debug("Successfully deserialized to VideoToSendDTO. Filename: {}", videoDTO.getFileName());
+                updateProcessor.sendVideo(videoDTO);
             }
             else {
                 log.warn("Received message with unhandled or unexpected __TypeId__: {}. Body preview: {}", typeId, new String(body).substring(0, Math.min(100, body.length)));

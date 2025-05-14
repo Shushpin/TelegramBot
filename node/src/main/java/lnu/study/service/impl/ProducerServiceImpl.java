@@ -3,6 +3,7 @@ package lnu.study.service.impl;
 import lnu.study.dto.AudioToSendDTO;
 import lnu.study.dto.DocumentToSendDTO;
 import lnu.study.dto.PhotoToSendDTO;
+import lnu.study.dto.VideoToSendDTO;
 import lnu.study.service.ProducerService;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Service;
@@ -57,11 +58,8 @@ public class ProducerServiceImpl implements ProducerService {
 
         rabbitTemplate.convertAndSend(ANSWER_MESSAGE, audioToSendDTO);
     }
-    // Якщо б ви обрали один загальний метод:
-    /*
     @Override
-    public void producerSendBotApiMethod(org.telegram.telegrambots.meta.api.methods.BotApiMethod<?> method) {
-        rabbitTemplate.convertAndSend(ANSWER_MESSAGE, method);
+    public void producerSendVideoDTO(VideoToSendDTO dto) { // Новий метод
+        rabbitTemplate.convertAndSend(ANSWER_MESSAGE, dto); // Або інша черга, якщо потрібно
     }
-    */
 }

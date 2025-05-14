@@ -12,5 +12,7 @@ import org.springframework.http.ResponseEntity;
 
         ResponseEntity<byte[]> convertAudioFile(ByteArrayResource fileResource, String originalFilename, String targetFormat, String converterApiEndpoint);
 
+        ResponseEntity<byte[]> convertVideoFile(ByteArrayResource fileResource, String originalFilename, String targetFormat, String converterApiEndpoint);
+
     }
 

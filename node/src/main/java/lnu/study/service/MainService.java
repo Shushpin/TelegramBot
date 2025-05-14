@@ -9,4 +9,5 @@ public interface MainService {
     void processPhotoMessage(Update update);
     void processVoiceMessage(Update update);
     void processAudioMessage(Update update);
+    void processVideoMessage(Update update);
 }
