@@ -6,7 +6,8 @@ public enum ServiceCommand {
     CANCEL("/cancel"),
     START("/start"),
     RESEND_EMAIL("/resend_email"),
-    CONVERT_FILE("/convert_file");
+    CONVERT_FILE("/convert_file"),
+    GENERATE_LINK("/generate_link");;
 
     private final String value;
 
