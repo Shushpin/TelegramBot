@@ -12,6 +12,7 @@ import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import static lnu.study.model.RabbitQueue.CALLBACK_QUERY_UPDATE;
 
 import static lnu.study.model.RabbitQueue.*;
 
@@ -41,9 +42,10 @@ public class UpdateProcessor {
         }
         if (update.hasMessage()) {
             distributeMessagesByType(update);
-        } else if (update.hasCallbackQuery()) {
-            log.warn("CallbackQuery received: {}", update.getCallbackQuery().getData());
-            setUnsupportedMessageTypeView(update);
+        } else if (update.hasCallbackQuery()) { // <--- ОСЬ ЦЕЙ БЛОК ЗМІНЮЄМО
+            log.info("Dispatcher: CallbackQuery received: {} from chat_id: {}", update.getCallbackQuery().getData(), update.getCallbackQuery().getMessage().getChatId());
+            // Замість setUnsupportedMessageTypeView(update); або просто логування:
+            updateProducer.produce(CALLBACK_QUERY_UPDATE, update); // Надсилаємо в нову чергу
         } else {
             log.error("Unsupported update type or message is null: " + update);
             setUnsupportedMessageTypeView(update);

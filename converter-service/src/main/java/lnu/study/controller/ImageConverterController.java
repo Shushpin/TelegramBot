@@ -111,7 +111,6 @@ public class ImageConverterController {
                 format.equalsIgnoreCase("jpeg") ||
                 format.equalsIgnoreCase("png") ||
                 format.equalsIgnoreCase("bmp") ||
-                format.equalsIgnoreCase("tiff") ||
                 format.equalsIgnoreCase("webp");
     }
 
@@ -124,8 +123,6 @@ public class ImageConverterController {
                 return "image/png";
             case "bmp":
                 return "image/bmp";
-            case "tiff":
-                return "image/tiff";
             case "webp":
                 return "image/webp";
             default:

@@ -28,6 +28,10 @@ import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.api.objects.Video;
 import org.telegram.telegrambots.meta.api.objects.Voice;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
+import java.util.ArrayList;
+import java.util.List;
 
 import java.util.Arrays;
 import java.util.Comparator;
@@ -226,11 +230,17 @@ public class MainServiceImpl implements MainService {
                         converterApiEndpoint = "/api/document/convert";
                         fileTypeDescription = "Документ";
                         response = converterClientService.convertFile(fileResource, finalOriginalFileName, targetFormat, converterApiEndpoint);
-                    } else if (isPhotoAsDocument) {
-                        targetFormat = "png";
-                        converterApiEndpoint = "/api/convert";
-                        fileTypeDescription = "Фото (як документ)";
-                        response = converterClientService.convertFile(fileResource, finalOriginalFileName, targetFormat, converterApiEndpoint);
+                    } else if (isPhotoAsDocument) { // <--- ОСЬ ЦЯ ГІЛКА ЗМІНЮЄТЬСЯ
+                        log.info("Photo received as document from user {}. Switching to AWAITING_TARGET_FORMAT_SELECTION. FileID: {}, FileName: {}", appUser.getTelegramUserId(), fileId, finalOriginalFileName);
+
+                        // Зберігаємо fileId документа (який є фото) та originalFileName
+                        appUser.setPendingFileId(fileId);
+                        appUser.setPendingOriginalFileName(finalOriginalFileName);
+                        appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
+                        appUserDAO.save(appUser);
+
+                        sendFormatSelectionMessage(chatId, "photo_document");
+                        return; // Дуже важливо завершити тут, ми чекаємо на вибір формату
                     } else if (isVideoAsDocument) {
                         targetFormat = TARGET_VIDEO_CONVERT_FORMAT;
                         converterApiEndpoint = "/api/video/convert";
@@ -317,43 +327,14 @@ public class MainServiceImpl implements MainService {
 
             String fileId = photoSize.getFileId();
             String originalFileName = "photo_" + appUser.getTelegramUserId() + "_" + System.currentTimeMillis() + ".jpg"; // Можна взяти з photoSize, якщо є
-            byte[] fileData;
-            try {
-                fileData = fileService.downloadFileAsByteArray(fileId);
-                if (fileData == null || fileData.length == 0) throw new UploadFileException("Фото порожнє.");
-            } catch (Exception e) {
-                sendAnswer("Не вдалося завантажити фото для конвертації.", chatId); return;
-            }
+            appUser.setPendingFileId(fileId);
+            appUser.setPendingOriginalFileName(originalFileName); // Ти вже генеруєш originalFileName, це добре
+            appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
+            appUserDAO.save(appUser);
 
-            ByteArrayResource fileResource = new ByteArrayResource(fileData) {
-                @Override public String getFilename() { return originalFileName; }
-            };
-            String targetFormat = "png";
-            String converterApiEndpoint = "/api/convert";
-            boolean conversionSuccess = false;
-            sendAnswer("Фото '" + originalFileName + "' отримано. Конвертую в PNG...", chatId);
-
-            try {
-                ResponseEntity<byte[]> response = converterClientService.convertFile(fileResource, originalFileName, targetFormat, converterApiEndpoint);
-                if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-                    byte[] convertedFileData = response.getBody();
-                    String baseName = originalFileName.contains(".") ? originalFileName.substring(0, originalFileName.lastIndexOf('.')) : originalFileName;
-                    String convertedFileName = "converted_" + baseName + "." + targetFormat;
-                    producerService.producerSendPhotoDTO(PhotoToSendDTO.builder()
-                            .chatId(chatId.toString()).photoBytes(convertedFileData).fileName(convertedFileName).caption("Сконвертовано: "+originalFileName).build());
-                    // sendAnswer("Фото '" + originalFileName + "' успішно сконвертовано в PNG!", chatId); // Перенесено
-                    conversionSuccess = true;
-                } else {
-                    sendAnswer("Помилка конвертації фото. Статус: " + response.getStatusCode(), chatId);
-                }
-            } catch (Exception e) {
-                sendAnswer("Критична помилка сервісу конвертації для фото.", chatId);
-            } finally {
-                if (conversionSuccess) {
-                    sendPostConversionMessage(chatId);
-                }
-                // Стан не змінюємо, залишаємо AWAITING_FILE_FOR_CONVERSION
-            }
+            sendFormatSelectionMessage(chatId, "photo"); // Викликаємо наш новий метод
+            log.info("Photo received from user {}. Switched to AWAITING_TARGET_FORMAT_SELECTION. FileID: {}, FileName: {}", appUser.getTelegramUserId(), fileId, originalFileName);
+            return; // Важливо завершити виконання тут, оскільки ми чекаємо на відповідь користувача
         } else {
             log.info("User {} sent a photo (not for conversion).", appUser.getTelegramUserId());
             String permissionError = checkPermissionError(appUser);
@@ -691,5 +672,192 @@ public class MainServiceImpl implements MainService {
     private void saveRawData(Update update) {
         if (update == null || update.getUpdateId() == null) return;
         rawDataDAO.save(RawData.builder().event(update).build());
+    }
+
+    private void sendFormatSelectionMessage(Long chatId, String fileTypeContext) { // fileTypeContext поки не використовуємо, але може знадобитися
+        SendMessage sendMessage = new SendMessage();
+        sendMessage.setChatId(chatId.toString());
+        sendMessage.setText("Оберіть цільовий формат для конвертації фото:");
+
+        InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
+
+        List<InlineKeyboardButton> rowInline1 = new ArrayList<>();
+        rowInline1.add(InlineKeyboardButton.builder().text("JPG").callbackData("format_select_jpg").build());
+        rowInline1.add(InlineKeyboardButton.builder().text("PNG").callbackData("format_select_png").build());
+
+        List<InlineKeyboardButton> rowInline2 = new ArrayList<>();
+        rowInline2.add(InlineKeyboardButton.builder().text("BMP").callbackData("format_select_bmp").build());
+        rowInline2.add(InlineKeyboardButton.builder().text("WEBP").callbackData("format_select_webp").build());
+
+        // Якщо потрібно додати TIFF:
+        // List<InlineKeyboardButton> rowInline3 = new ArrayList<>();
+        // rowInline3.add(InlineKeyboardButton.builder().text("TIFF").callbackData("format_select_tiff").build());
+
+        rowsInline.add(rowInline1);
+        rowsInline.add(rowInline2);
+        // if (rowInline3.size() > 0) rowsInline.add(rowInline3); // Якщо додали третій ряд
+
+        markupInline.setKeyboard(rowsInline);
+        sendMessage.setReplyMarkup(markupInline);
+
+        producerService.producerAnswer(sendMessage);
+        log.info("Sent format selection keyboard to chat_id: {} for context: {}", chatId, fileTypeContext);
+    }
+    // ... інші методи класу ...
+
+    @Transactional
+    public void processFormatSelectionCallback(Update update) {
+        // Перевіряємо, чи є CallbackQuery і чи є дані в ньому
+        if (update == null || !update.hasCallbackQuery() || update.getCallbackQuery().getData() == null) {
+            log.warn("Received update in processFormatSelectionCallback without valid CallbackQuery or data.");
+            return;
+        }
+
+        var callbackQuery = update.getCallbackQuery();
+        var chatId = callbackQuery.getMessage().getChatId();
+        var appUser = findOrSaveAppUser(update); // findOrSaveAppUser має коректно обробляти User з CallbackQuery
+        String callbackData = callbackQuery.getData();
+
+        if (appUser == null) {
+            log.warn("AppUser is null for callback query from chat_id: {}", chatId);
+            // Можливо, варто відповісти користувачеві, що сталася помилка
+            // answerCallbackQuery(callbackQuery.getId(), "Помилка: користувача не знайдено."); // Потрібно буде додати метод answerCallbackQuery
+            return;
+        }
+
+        log.info("Processing format selection callback for user_id: {}. Chat_id: {}. Callback data: '{}'. Current state: {}",
+                appUser.getTelegramUserId(), chatId, callbackData, appUser.getState());
+
+        // Перевіряємо, чи користувач у правильному стані і чи дані колбеку відповідають нашим очікуванням
+        if (AWAITING_TARGET_FORMAT_SELECTION.equals(appUser.getState()) && callbackData.startsWith("format_select_")) {
+            String targetFormat = callbackData.substring("format_select_".length()); // Отримуємо сам формат (наприклад, "jpg")
+
+            String fileIdForConversion = appUser.getPendingFileId();
+            String originalFileNameForConversion = appUser.getPendingOriginalFileName();
+
+            if (fileIdForConversion == null || originalFileNameForConversion == null) {
+                log.error("Pending file ID or original name is null for user {} in AWAITING_TARGET_FORMAT_SELECTION state.", appUser.getTelegramUserId());
+                sendAnswer("Помилка: не можу знайти файл, який ви хотіли конвертувати. Будь ласка, надішліть його знову.", chatId);
+                // Скидаємо стан і "завислі" дані
+                appUser.setPendingFileId(null);
+                appUser.setPendingOriginalFileName(null);
+                appUser.setState(AWAITING_FILE_FOR_CONVERSION); // Повертаємо до стану очікування файлу
+                appUserDAO.save(appUser);
+                // answerCallbackQuery(callbackQuery.getId(), "Помилка: файл не знайдено.");
+                return;
+            }
+
+            log.info("User {} selected format '{}' for file_id '{}', original_name '{}'",
+                    appUser.getTelegramUserId(), targetFormat, fileIdForConversion, originalFileNameForConversion);
+
+            byte[] fileData;
+            try {
+                // 1. Завантажити fileData за fileIdForConversion
+                fileData = fileService.downloadFileAsByteArray(fileIdForConversion);
+                if (fileData == null || fileData.length == 0) {
+                    throw new UploadFileException("Завантажений файл для конвертації порожній або відсутній.");
+                }
+                log.info("Successfully downloaded pending file for conversion: FileID='{}', OriginalName='{}', Size={}",
+                        fileIdForConversion, originalFileNameForConversion, fileData.length);
+            } catch (Exception e) {
+                log.error("Failed to download pending file_id {} for conversion: {}", fileIdForConversion, e.getMessage(), e);
+                sendAnswer("Не вдалося завантажити файл для конвертації. Спробуйте надіслати його знову.", chatId);
+                // Скидаємо стан і "завислі" дані
+                appUser.setPendingFileId(null);
+                appUser.setPendingOriginalFileName(null);
+                appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+                appUserDAO.save(appUser);
+                // producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка завантаження файлу"); // Якщо реалізовано
+                return;
+            }
+
+            // 2. Створити ByteArrayResource
+            final String finalOriginalName = originalFileNameForConversion; // для використання в лямбді
+            ByteArrayResource fileResource = new ByteArrayResource(fileData) {
+                @Override
+                public String getFilename() {
+                    return finalOriginalName;
+                }
+            };
+
+            String converterApiEndpoint = "/api/convert"; // Для фото використовуємо цей ендпоінт
+            boolean conversionSuccess = false;
+
+            // Інформативне повідомлення користувачеві
+            sendAnswer("Розпочинаю конвертацію фото '" + originalFileNameForConversion + "' у формат " + targetFormat.toUpperCase() + "...", chatId);
+
+            try {
+                // 3. Викликати converterClientService.convertFile(...) з новим targetFormat
+                ResponseEntity<byte[]> response = converterClientService.convertFile(fileResource, originalFileNameForConversion, targetFormat, converterApiEndpoint);
+
+                // 4. Обробити відповідь, надіслати сконвертований файл
+                if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                    byte[] convertedFileData = response.getBody();
+                    String baseName = originalFileNameForConversion.contains(".") ?
+                            originalFileNameForConversion.substring(0, originalFileNameForConversion.lastIndexOf('.')) :
+                            originalFileNameForConversion;
+                    String convertedFileName = "converted_" + baseName + "." + targetFormat;
+
+                    producerService.producerSendPhotoDTO(PhotoToSendDTO.builder()
+                            .chatId(chatId.toString())
+                            .photoBytes(convertedFileData)
+                            .fileName(convertedFileName)
+                            .caption("Сконвертовано: " + originalFileNameForConversion + " -> " + targetFormat.toUpperCase())
+                            .build());
+                    conversionSuccess = true;
+                    log.info("Successfully converted and sent photo '{}' to format '{}' for user {}",
+                            originalFileNameForConversion, targetFormat, appUser.getTelegramUserId());
+                } else {
+                    log.error("Conversion failed for photo '{}' to {}. Status: {}. Response body present: {}",
+                            originalFileNameForConversion, targetFormat,
+                            response.getStatusCode(), response.getBody() != null);
+                    sendAnswer("Помилка конвертації фото в " + targetFormat.toUpperCase() + ". Статус: " + response.getStatusCode(), chatId);
+                }
+            } catch (Exception e) {
+                log.error("Critical exception during photo conversion call for file {}: {}", originalFileNameForConversion, e.getMessage(), e);
+                sendAnswer("Критична помилка сервісу конвертації для вашого фото.", chatId);
+            } finally {
+                // 6. Очистити pending поля
+                appUser.setPendingFileId(null);
+                appUser.setPendingOriginalFileName(null);
+
+                if (conversionSuccess) {
+                    // 5. Надіслати повідомлення sendPostConversionMessage(chatId); у разі успіху
+                    sendPostConversionMessage(chatId);
+                } else {
+                    sendAnswer("Не вдалося сконвертувати файл. Спробуйте ще раз або оберіть інший файл/формат.", chatId);
+                }
+
+                // 7. Встановити стан (завжди повертаємо в очікування нового файлу для конвертації в цьому режимі)
+                appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+                // 8. Зберегти appUser
+                appUserDAO.save(appUser);
+
+                // 9. "Відповісти" на CallbackQuery
+                // Якщо producerService.producerAnswerCallbackQuery ще не реалізовано, цей рядок можна закоментувати.
+                // String callbackResponseMessage = conversionSuccess ? "Конвертовано в " + targetFormat.toUpperCase() : "Помилка конвертації";
+                // producerService.producerAnswerCallbackQuery(callbackQuery.getId(), callbackResponseMessage);
+            }
+
+            // Потрібно буде реалізувати answerCallbackQuery через ProducerService, наприклад:
+            // producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Обробка формату " + targetFormat.toUpperCase());
+            // Або можна поки що нічого не відповідати на callback, кнопка просто перестане бути активною
+
+        } else if (callbackData.startsWith("format_select_")) {
+            // Користувач натиснув кнопку вибору формату, але він не в тому стані
+            log.warn("User {} (state: {}) pressed format selection button '{}', but not in AWAITING_TARGET_FORMAT_SELECTION state.",
+                    appUser.getTelegramUserId(), appUser.getState(), callbackData);
+            sendAnswer("Здається, сталася помилка зі станом. Будь ласка, спробуйте надіслати файл для конвертації знову.", chatId);
+            // Можна скинути стан до базового або до очікування файлу
+            appUser.setState(BASIC_STATE);
+            appUserDAO.save(appUser);
+            // answerCallbackQuery(callbackQuery.getId(), "Помилка стану.");
+        } else {
+            // Інший CallbackQuery, який ми не очікуємо тут
+            log.warn("Received unexpected callback_data '{}' from user {} in state {}",
+                    callbackData, appUser.getTelegramUserId(), appUser.getState());
+            // answerCallbackQuery(callbackQuery.getId(), null); // Просто прибрати годинник
+        }
     }
 }

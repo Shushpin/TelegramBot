@@ -30,5 +30,7 @@ public class AppUser {
     private boolean isActive;
     @Enumerated(EnumType.STRING)
     private UserState state;
+    private String pendingFileId;
+    private String pendingOriginalFileName;
 
 }

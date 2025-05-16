@@ -5,9 +5,11 @@ import lnu.study.service.MainService;
 import lnu.study.service.ProducerService;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import static lnu.study.model.RabbitQueue.CALLBACK_QUERY_UPDATE;
 
 import static lnu.study.model.RabbitQueue.*;
 
@@ -53,4 +55,16 @@ public class ConsumerServiceImpl implements ConsumerService {
         log.debug("NODE: Voice Message is received from RabbitMQ");
         mainService.processVoiceMessage(update);
     }
+    @RabbitListener(queues = CALLBACK_QUERY_UPDATE)
+    public void consumeCallbackQueryUpdate(@Payload Update update) {
+        log.debug("NODE: Callback Query Update is received from queue {}", CALLBACK_QUERY_UPDATE);
+        try {
+            mainService.processFormatSelectionCallback(update);
+        } catch (Exception e) {
+            log.error("Error processing callback query update: {}", e.getMessage(), e);
+            // Тут можна додати логіку для надсилання повідомлення про помилку користувачеві,
+            // або просто логувати, залежно від політики обробки помилок.
+        }
+    }
+
 }

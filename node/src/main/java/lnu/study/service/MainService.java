@@ -10,4 +10,6 @@ public interface MainService {
     void processVoiceMessage(Update update);
     void processAudioMessage(Update update);
     void processVideoMessage(Update update);
+
+    void processFormatSelectionCallback(Update update);
 }
