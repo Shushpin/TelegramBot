@@ -8,6 +8,8 @@ import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import static lnu.study.model.RabbitQueue.ANSWER_CALLBACK_QUEUE; // Додай цей імпорт
+
 
 // Переконайтесь, що константи імпортуються правильно
 import static lnu.study.model.RabbitQueue.*;
@@ -49,5 +51,9 @@ public class RabbitConfiguration {
     @Bean
     public Queue voiceMessageQueue() {
         return new Queue(VOICE_MESSAGE_UPDATE);
+    }
+    @Bean
+    public Queue answerCallbackQueue() {
+        return new Queue(ANSWER_CALLBACK_QUEUE);
     }
 }

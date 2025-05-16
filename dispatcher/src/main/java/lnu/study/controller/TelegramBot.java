@@ -20,6 +20,9 @@ import org.apache.logging.log4j.LogManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
+import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery; // Додай імпорт
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException; // Додай імпорт
+
 
 import java.io.ByteArrayInputStream;
 // import java.io.Serializable; // Цей імпорт не використовується, можна видалити, якщо не потрібен для іншого
@@ -196,6 +199,18 @@ public class TelegramBot extends TelegramWebhookBot {
             log.debug("Video DTO sent to chat_id: {}", dto.getChatId());
         } catch (TelegramApiException e) {
             log.error("Failed to send Video DTO to chat_id {}: {}", dto.getChatId(), e.getMessage(), e);
+        }
+    }
+    public void executeAnswerCallbackQuery(AnswerCallbackQuery answer) {
+        if (answer == null) {
+            log.warn("Attempted to execute a null AnswerCallbackQuery object.");
+            return;
+        }
+        try {
+            execute(answer); // Метод execute з батьківського класу TelegramWebhookBot
+            log.debug("Successfully executed AnswerCallbackQuery for id: {}", answer.getCallbackQueryId());
+        } catch (TelegramApiException e) {
+            log.error("Failed to execute AnswerCallbackQuery for id {}: {}", answer.getCallbackQueryId(), e.getMessage(), e);
         }
     }
 }

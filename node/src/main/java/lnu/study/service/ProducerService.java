@@ -25,6 +25,8 @@ public interface ProducerService {
 
     void producerSendVideoDTO(VideoToSendDTO videoToSendDTO);// Новий метод
 
+    void producerAnswerCallbackQuery(String callbackQueryId, String text);
+
     // Альтернативно, один більш загальний метод, якщо хочете:
     // void producerSendBotApiMethod(org.telegram.telegrambots.meta.api.methods.BotApiMethod<?> method);
 }

@@ -16,6 +16,9 @@ import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
+import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery; // Додай імпорт
+import static lnu.study.model.RabbitQueue.ANSWER_CALLBACK_QUEUE; // Додай імпорт
+
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -109,5 +112,10 @@ public class AnswerConsumerImpl implements AnswerConsumer {
         } catch (Exception e) {
             log.error("Unexpected error processing message with __TypeId__ '{}': {}. Message body preview: {}", typeId, e.getMessage(), new String(message.getBody()).substring(0, Math.min(100, message.getBody().length)), e);
         }
+    }
+    @RabbitListener(queues = ANSWER_CALLBACK_QUEUE)
+    public void consumeAnswerCallbackQuery(AnswerCallbackQuery answer) {
+        log.debug("Received AnswerCallbackQuery with id: {}", answer.getCallbackQueryId());
+
     }
 }

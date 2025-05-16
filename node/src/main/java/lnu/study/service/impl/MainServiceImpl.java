@@ -744,7 +744,11 @@ public class MainServiceImpl implements MainService {
                 appUser.setPendingOriginalFileName(null);
                 appUser.setState(AWAITING_FILE_FOR_CONVERSION); // Повертаємо до стану очікування файлу
                 appUserDAO.save(appUser);
-                // answerCallbackQuery(callbackQuery.getId(), "Помилка: файл не знайдено.");
+                appUser.setState(AWAITING_FILE_FOR_CONVERSION); // Повертаємо до стану очікування файлу
+                appUserDAO.save(appUser);
+                if (callbackQuery != null && callbackQuery.getId() != null) { // Додано
+                    producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка: файл не знайдено");
+                }
                 return;
             }
 
@@ -768,7 +772,11 @@ public class MainServiceImpl implements MainService {
                 appUser.setPendingOriginalFileName(null);
                 appUser.setState(AWAITING_FILE_FOR_CONVERSION);
                 appUserDAO.save(appUser);
-                // producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка завантаження файлу"); // Якщо реалізовано
+                appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+                appUserDAO.save(appUser);
+                if (callbackQuery != null && callbackQuery.getId() != null) { // Додано
+                    producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка завантаження файлу");
+                }
                 return;
             }
 
@@ -797,17 +805,20 @@ public class MainServiceImpl implements MainService {
                     String baseName = originalFileNameForConversion.contains(".") ?
                             originalFileNameForConversion.substring(0, originalFileNameForConversion.lastIndexOf('.')) :
                             originalFileNameForConversion;
-                    String convertedFileName = "converted_" + baseName + "." + targetFormat;
+                    // Переконуємося, що ім'я файлу має правильне розширення
+                    String convertedFileNameWithTargetExt = "converted_" + baseName + "." + targetFormat;
 
-                    producerService.producerSendPhotoDTO(PhotoToSendDTO.builder()
+                    producerService.producerSendDocumentDTO(DocumentToSendDTO.builder() // <--- ЗМІНЕНО ТУТ
                             .chatId(chatId.toString())
-                            .photoBytes(convertedFileData)
-                            .fileName(convertedFileName)
-                            .caption("Сконвертовано: " + originalFileNameForConversion + " -> " + targetFormat.toUpperCase())
+                            .documentBytes(convertedFileData) // <--- Поле тепер documentBytes
+                            .fileName(convertedFileNameWithTargetExt) // <--- Ім'я файлу з новим розширенням
+                            .caption("Сконвертовано: " + originalFileNameForConversion + " -> " + targetFormat.toUpperCase() +
+                                    "\nТип файлу: " + targetFormat.toUpperCase()) // Додамо тип файлу в підпис для ясності
                             .build());
                     conversionSuccess = true;
-                    log.info("Successfully converted and sent photo '{}' to format '{}' for user {}",
-                            originalFileNameForConversion, targetFormat, appUser.getTelegramUserId());
+                    log.info("Successfully converted and sent image as document '{}' (original: '{}') to format '{}' for user {}",
+                            convertedFileNameWithTargetExt, originalFileNameForConversion, targetFormat, appUser.getTelegramUserId());
+
                 } else {
                     log.error("Conversion failed for photo '{}' to {}. Status: {}. Response body present: {}",
                             originalFileNameForConversion, targetFormat,
@@ -822,11 +833,15 @@ public class MainServiceImpl implements MainService {
                 appUser.setPendingFileId(null);
                 appUser.setPendingOriginalFileName(null);
 
+                String callbackResponseMessage = null; // Оголошуємо змінну для повідомлення
+
                 if (conversionSuccess) {
                     // 5. Надіслати повідомлення sendPostConversionMessage(chatId); у разі успіху
                     sendPostConversionMessage(chatId);
+                    callbackResponseMessage = "Конвертовано в " + targetFormat.toUpperCase() + "!";
                 } else {
                     sendAnswer("Не вдалося сконвертувати файл. Спробуйте ще раз або оберіть інший файл/формат.", chatId);
+                    callbackResponseMessage = "Помилка конвертації";
                 }
 
                 // 7. Встановити стан (завжди повертаємо в очікування нового файлу для конвертації в цьому режимі)
@@ -835,14 +850,11 @@ public class MainServiceImpl implements MainService {
                 appUserDAO.save(appUser);
 
                 // 9. "Відповісти" на CallbackQuery
-                // Якщо producerService.producerAnswerCallbackQuery ще не реалізовано, цей рядок можна закоментувати.
-                // String callbackResponseMessage = conversionSuccess ? "Конвертовано в " + targetFormat.toUpperCase() : "Помилка конвертації";
-                // producerService.producerAnswerCallbackQuery(callbackQuery.getId(), callbackResponseMessage);
+                if (callbackQuery != null && callbackQuery.getId() != null) { // Додаткова перевірка
+                    producerService.producerAnswerCallbackQuery(callbackQuery.getId(), callbackResponseMessage);
+                }
             }
 
-            // Потрібно буде реалізувати answerCallbackQuery через ProducerService, наприклад:
-            // producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Обробка формату " + targetFormat.toUpperCase());
-            // Або можна поки що нічого не відповідати на callback, кнопка просто перестане бути активною
 
         } else if (callbackData.startsWith("format_select_")) {
             // Користувач натиснув кнопку вибору формату, але він не в тому стані
@@ -852,12 +864,19 @@ public class MainServiceImpl implements MainService {
             // Можна скинути стан до базового або до очікування файлу
             appUser.setState(BASIC_STATE);
             appUserDAO.save(appUser);
-            // answerCallbackQuery(callbackQuery.getId(), "Помилка стану.");
+            appUser.setState(BASIC_STATE);
+            appUserDAO.save(appUser);
+            if (callbackQuery != null && callbackQuery.getId() != null) { // Додано
+                producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка стану");
+            }
         } else {
             // Інший CallbackQuery, який ми не очікуємо тут
             log.warn("Received unexpected callback_data '{}' from user {} in state {}",
                     callbackData, appUser.getTelegramUserId(), appUser.getState());
-            // answerCallbackQuery(callbackQuery.getId(), null); // Просто прибрати годинник
-        }
+            log.warn("Received unexpected callback_data '{}' from user {} in state {}",
+                    callbackData, appUser.getTelegramUserId(), appUser.getState());
+            if (callbackQuery != null && callbackQuery.getId() != null) { // Додано
+                producerService.producerAnswerCallbackQuery(callbackQuery.getId(), null); // Просто прибрати годинник, без тексту
+            }        }
     }
 }

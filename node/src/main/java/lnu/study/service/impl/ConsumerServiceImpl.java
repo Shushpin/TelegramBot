@@ -11,6 +11,7 @@ import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import static lnu.study.model.RabbitQueue.CALLBACK_QUERY_UPDATE;
 
+
 import static lnu.study.model.RabbitQueue.*;
 
 @Service
@@ -66,5 +67,6 @@ public class ConsumerServiceImpl implements ConsumerService {
             // або просто логувати, залежно від політики обробки помилок.
         }
     }
+
 
 }
