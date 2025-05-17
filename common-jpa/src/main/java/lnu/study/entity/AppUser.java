@@ -28,9 +28,12 @@ public class AppUser {
     public String userName;
     public String email;
     private boolean isActive;
+
     @Enumerated(EnumType.STRING)
     private UserState state;
+
     private String pendingFileId;
     private String pendingOriginalFileName;
+    private String pendingFileType;
 
 }

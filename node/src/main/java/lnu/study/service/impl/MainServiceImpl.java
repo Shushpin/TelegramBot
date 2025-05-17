@@ -236,16 +236,24 @@ public class MainServiceImpl implements MainService {
                         // Зберігаємо fileId документа (який є фото) та originalFileName
                         appUser.setPendingFileId(fileId);
                         appUser.setPendingOriginalFileName(finalOriginalFileName);
+                        appUser.setPendingFileType("photo");
                         appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
                         appUserDAO.save(appUser);
 
                         sendFormatSelectionMessage(chatId, "photo_document");
                         return; // Дуже важливо завершити тут, ми чекаємо на вибір формату
-                    } else if (isVideoAsDocument) {
-                        targetFormat = TARGET_VIDEO_CONVERT_FORMAT;
-                        converterApiEndpoint = "/api/video/convert";
-                        fileTypeDescription = "Відео (як документ)";
-                        response = converterClientService.convertVideoFile(fileResource, finalOriginalFileName, targetFormat, converterApiEndpoint);
+                    } else if (isVideoAsDocument) { // <--- ОСЬ ЦЯ ГІЛКА ЗМІНЮЄТЬСЯ
+                        log.info("Video received as document from user {}. Switching to AWAITING_TARGET_FORMAT_SELECTION. FileID: {}, FileName: {}",
+                                appUser.getTelegramUserId(), fileId, finalOriginalFileName);
+
+                        appUser.setPendingFileId(fileId); // fileId документа (який є відео)
+                        appUser.setPendingOriginalFileName(finalOriginalFileName);
+                        appUser.setPendingFileType("video"); // <--- Встановлюємо тип
+                        appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
+                        appUserDAO.save(appUser);
+
+                        sendVideoFormatSelectionMessage(chatId); // <--- Новий метод для вибору формату відео
+                        return; // Дуже важливо завершити тут, ми чекаємо на вибір формату
                     }
 
                     if (response != null && response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
@@ -328,7 +336,8 @@ public class MainServiceImpl implements MainService {
             String fileId = photoSize.getFileId();
             String originalFileName = "photo_" + appUser.getTelegramUserId() + "_" + System.currentTimeMillis() + ".jpg"; // Можна взяти з photoSize, якщо є
             appUser.setPendingFileId(fileId);
-            appUser.setPendingOriginalFileName(originalFileName); // Ти вже генеруєш originalFileName, це добре
+            appUser.setPendingOriginalFileName(originalFileName);
+            appUser.setPendingFileType("photo");
             appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
             appUserDAO.save(appUser);
 
@@ -422,18 +431,17 @@ public class MainServiceImpl implements MainService {
         log.info("ENTERING processVideoMessage for user {}. Current state: {}", appUser.getTelegramUserId(), appUser.getState());
 
         var chatId = update.getMessage().getChatId();
-        var telegramUserId = appUser.getTelegramUserId();
         Message message = update.getMessage();
         Video telegramVideo = message.getVideo();
 
         if (telegramVideo == null) {
-            log.warn("Message for user {} was routed to processVideoMessage, but Video object is null.", telegramUserId);
+            log.warn("Message for user {} was routed to processVideoMessage, but Video object is null.", appUser.getTelegramUserId());
             sendAnswer("Очікувався відеофайл, але він відсутній.", chatId);
             return;
         }
 
         if (AWAITING_FILE_FOR_CONVERSION.equals(appUser.getState())) {
-            log.info("STATE IS AWAITING_FILE_FOR_CONVERSION (VideoMessage) for user {}", telegramUserId);
+            log.info("STATE IS AWAITING_FILE_FOR_CONVERSION (VideoMessage) for user {}", appUser.getTelegramUserId());
 
             if (!appUser.isActive()) {
                 sendAnswer("Будь ласка, активуйте свій акаунт перед конвертацією файлів.", chatId);
@@ -442,81 +450,73 @@ public class MainServiceImpl implements MainService {
 
             String originalFileName = telegramVideo.getFileName();
             if (originalFileName == null || originalFileName.isEmpty()) {
+                // Проста генерація імені, якщо воно відсутнє
                 String mimeType = telegramVideo.getMimeType() != null ? telegramVideo.getMimeType().toLowerCase() : "video/mp4";
-                String ext = "mp4";
+                String ext = "mp4"; // Default
                 if (mimeType.contains("mp4")) ext = "mp4";
                 else if (mimeType.contains("quicktime")) ext = "mov";
                 else if (mimeType.contains("x-msvideo")) ext = "avi";
                 else if (mimeType.contains("x-matroska")) ext = "mkv";
                 else if (mimeType.contains("webm")) ext = "webm";
-                originalFileName = "video_" + telegramUserId + "_" + System.currentTimeMillis() + "." + ext;
+                originalFileName = "video_" + appUser.getTelegramUserId() + "_" + System.currentTimeMillis() + "." + ext;
                 log.info("Generated filename for direct video message: {}", originalFileName);
             }
 
             String fileId = telegramVideo.getFileId();
-            byte[] fileData;
 
-            try {
-                fileData = fileService.downloadFileAsByteArray(fileId);
-                if (fileData == null || fileData.length == 0) {
-                    throw new UploadFileException("Завантажені дані відео порожні або відсутні.");
-                }
-                log.info("Successfully downloaded video for conversion: FileID='{}', OriginalName='{}', Size={}", fileId, originalFileName, fileData.length);
-            } catch (Exception e) {
-                log.error("Failed to download video for conversion (fileId: {}) for user {}: {}", fileId, telegramUserId, e.getMessage(), e);
-                sendAnswer("Не вдалося завантажити ваше відео для конвертації. Спробуйте ще раз або /cancel.", chatId);
-                return;
-            }
+            appUser.setPendingFileId(fileId);
+            appUser.setPendingOriginalFileName(originalFileName);
+            appUser.setPendingFileType("video"); // <--- Встановлюємо тип
+            appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
+            appUserDAO.save(appUser);
 
-            final String finalOriginalFileName = originalFileName;
-            ByteArrayResource fileResource = new ByteArrayResource(fileData) {
-                @Override public String getFilename() { return finalOriginalFileName; }
-            };
+            sendVideoFormatSelectionMessage(chatId); // <--- Новий метод для вибору формату відео
+            log.info("Video received from user {}. Switched to AWAITING_TARGET_FORMAT_SELECTION. FileID: {}, FileName: {}",
+                    appUser.getTelegramUserId(), fileId, originalFileName);
+            return;
 
-            String targetFormat = TARGET_VIDEO_CONVERT_FORMAT;
-            String converterApiEndpoint = "/api/video/convert";
-            String fileTypeDescription = "Відео";
-            boolean conversionSuccess = false;
-
-            sendAnswer(fileTypeDescription + " '" + finalOriginalFileName + "' отримано. Конвертую в " + targetFormat.toUpperCase() + "...", chatId);
-
-            try {
-                ResponseEntity<byte[]> response = converterClientService.convertVideoFile(fileResource, finalOriginalFileName, targetFormat, converterApiEndpoint);
-
-                if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-                    byte[] convertedFileData = response.getBody();
-                    log.info("Video '{}' successfully converted to {}. Size: {} bytes.", finalOriginalFileName, targetFormat, convertedFileData.length);
-
-                    String baseName = finalOriginalFileName.contains(".") ? finalOriginalFileName.substring(0, finalOriginalFileName.lastIndexOf('.')) : finalOriginalFileName;
-                    String convertedFileNameWithExt = "converted_" + baseName + "." + targetFormat;
-
-                    VideoToSendDTO videoDTO = VideoToSendDTO.builder()
-                            .chatId(chatId.toString()).videoBytes(convertedFileData).fileName(convertedFileNameWithExt)
-                            .caption("Сконвертоване відео: " + finalOriginalFileName)
-                            .duration(telegramVideo.getDuration()).width(telegramVideo.getWidth()).height(telegramVideo.getHeight())
-                            .build();
-                    producerService.producerSendVideoDTO(videoDTO);
-                    // sendAnswer(fileTypeDescription + " '" + finalOriginalFileName + "' успішно сконвертовано в " + targetFormat.toUpperCase() + "!", chatId); // Перенесено
-                    conversionSuccess = true;
-                } else {
-                    String errorDetails = (response.getBody() != null) ? new String(response.getBody()) : "Немає деталей";
-                    log.error("Failed to convert video. Status: {}. Details: {}", response.getStatusCode(), errorDetails);
-                    sendAnswer("Помилка конвертації відео. Статус: " + response.getStatusCode(), chatId);
-                }
-            } catch (Exception e) {
-                log.error("Critical exception during video conversion call: {}", e.getMessage(), e);
-                sendAnswer("Критична помилка сервісу конвертації для відео.", chatId);
-            } finally {
-                if (conversionSuccess) {
-                    sendPostConversionMessage(chatId);
-                }
-                // Стан не змінюємо
-                // log.info("User {} state set back to BASIC_STATE after video conversion attempt.", telegramUserId); // Цей лог тепер неактуальний
-            }
         } else {
-            log.info("User {} sent a video message, but not in AWAITING_FILE_FOR_CONVERSION state.", telegramUserId);
-            sendAnswer("Відео отримано, але бот не в режимі конвертації. Використайте /convert_file, щоб увімкнути цей режим.", chatId);
+            log.info("User {} sent a video message, but not in AWAITING_FILE_FOR_CONVERSION state.", appUser.getTelegramUserId());
+            // Тут можна або просто проігнорувати (якщо не очікуємо відео для файлообмінника),
+            // або запропонувати перейти в режим конвертації, або обробити як файл для обміну, якщо така логіка є.
+            // Поки що залишимо як є - пропонуємо перейти в режим конвертації.
+            sendAnswer("Відео отримано, але бот не в режимі конвертації. Використайте /convert_file, щоб увімкнути цей режим, " +
+                    "або /generate_link, щоб просто поділитись файлом.", chatId);
         }
+    }
+
+    private void sendVideoFormatSelectionMessage(Long chatId) {
+        SendMessage sendMessage = new SendMessage();
+        sendMessage.setChatId(chatId.toString());
+        sendMessage.setText("Оберіть цільовий формат для конвертації ВІДЕО:");
+
+        InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
+
+        // Приклади форматів, обери ті, які підтримуватиме твій VideoConverterController
+        List<InlineKeyboardButton> rowInline1 = new ArrayList<>();
+        rowInline1.add(InlineKeyboardButton.builder().text("MP4").callbackData("format_select_video_mp4").build());
+        rowInline1.add(InlineKeyboardButton.builder().text("MKV").callbackData("format_select_video_mkv").build());
+
+        List<InlineKeyboardButton> rowInline2 = new ArrayList<>();
+        rowInline2.add(InlineKeyboardButton.builder().text("WEBM").callbackData("format_select_video_webm").build());
+        rowInline2.add(InlineKeyboardButton.builder().text("MOV").callbackData("format_select_video_mov").build());
+
+        // Новий ряд з кнопкою "Скасувати"
+        List<InlineKeyboardButton> rowCancel = new ArrayList<>();
+        rowCancel.add(InlineKeyboardButton.builder().text("❌ Скасувати вибір").callbackData("cancel_format_selection").build());
+
+        rowsInline.add(rowInline1);
+        rowsInline.add(rowInline2);
+        rowsInline.add(rowCancel);
+        // if (!rowInline3.isEmpty()) rowsInline.add(rowInline3);
+
+
+        markupInline.setKeyboard(rowsInline);
+        sendMessage.setReplyMarkup(markupInline);
+
+        producerService.producerAnswer(sendMessage);
+        log.info("Sent video format selection keyboard to chat_id: {}", chatId);
     }
 
     @Override
@@ -690,12 +690,14 @@ public class MainServiceImpl implements MainService {
         rowInline2.add(InlineKeyboardButton.builder().text("BMP").callbackData("format_select_bmp").build());
         rowInline2.add(InlineKeyboardButton.builder().text("WEBP").callbackData("format_select_webp").build());
 
-        // Якщо потрібно додати TIFF:
-        // List<InlineKeyboardButton> rowInline3 = new ArrayList<>();
-        // rowInline3.add(InlineKeyboardButton.builder().text("TIFF").callbackData("format_select_tiff").build());
+        // Новий ряд з кнопкою "Скасувати"
+        List<InlineKeyboardButton> rowCancel = new ArrayList<>();
+        rowCancel.add(InlineKeyboardButton.builder().text("❌ Скасувати вибір").callbackData("cancel_format_selection").build());
+
 
         rowsInline.add(rowInline1);
         rowsInline.add(rowInline2);
+        rowsInline.add(rowCancel);
         // if (rowInline3.size() > 0) rowsInline.add(rowInline3); // Якщо додали третій ряд
 
         markupInline.setKeyboard(rowsInline);
@@ -728,130 +730,263 @@ public class MainServiceImpl implements MainService {
 
         log.info("Processing format selection callback for user_id: {}. Chat_id: {}. Callback data: '{}'. Current state: {}",
                 appUser.getTelegramUserId(), chatId, callbackData, appUser.getState());
+        if ("cancel_format_selection".equals(callbackData)) {
+            log.info("User {} cancelled format selection.", appUser.getTelegramUserId());
 
-        // Перевіряємо, чи користувач у правильному стані і чи дані колбеку відповідають нашим очікуванням
-        if (AWAITING_TARGET_FORMAT_SELECTION.equals(appUser.getState()) && callbackData.startsWith("format_select_")) {
-            String targetFormat = callbackData.substring("format_select_".length()); // Отримуємо сам формат (наприклад, "jpg")
+            // Очищаємо збережені дані про файл
+            appUser.setPendingFileId(null);
+            appUser.setPendingOriginalFileName(null);
+            appUser.setPendingFileType(null);
 
-            String fileIdForConversion = appUser.getPendingFileId();
-            String originalFileNameForConversion = appUser.getPendingOriginalFileName();
+            // Повертаємо користувача в стан очікування файлу для конвертації
+            appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+            appUserDAO.save(appUser);
 
-            if (fileIdForConversion == null || originalFileNameForConversion == null) {
-                log.error("Pending file ID or original name is null for user {} in AWAITING_TARGET_FORMAT_SELECTION state.", appUser.getTelegramUserId());
-                sendAnswer("Помилка: не можу знайти файл, який ви хотіли конвертувати. Будь ласка, надішліть його знову.", chatId);
-                // Скидаємо стан і "завислі" дані
+            sendAnswer("Вибір формату скасовано. Можете надіслати інший файл для конвертації, або використати /cancel для виходу з режиму конвертації.", chatId);
+        }
+            // Перевіряємо, чи користувач у правильному стані і чи дані колбеку відповідають нашим очікуванням
+        if (AWAITING_TARGET_FORMAT_SELECTION.equals(appUser.getState())) {
+            String pendingFileType = appUser.getPendingFileType(); // Отримуємо тип файлу
+
+            if (callbackData.startsWith("format_select_video_") && "video".equals(pendingFileType)) {
+                // ОБРОБКА ВИБОРУ ФОРМАТУ ДЛЯ ВІДЕО
+                String targetFormat = callbackData.substring("format_select_video_".length());
+                log.info("User selected VIDEO format '{}'. Pending file type: {}", targetFormat, pendingFileType);
+
+                String fileIdForConversion = appUser.getPendingFileId();
+                String originalFileNameForConversion = appUser.getPendingOriginalFileName();
+
+                if (fileIdForConversion == null || originalFileNameForConversion == null) {
+                    // ... (обробка помилки: файл не знайдено, як для фото, але можна уточнити повідомлення для відео)
+                    log.error("Pending VIDEO file ID or original name is null for user {}...", appUser.getTelegramUserId());
+                    sendAnswer("Помилка: не можу знайти ВІДЕО, яке ви хотіли конвертувати...", chatId);
+                    appUser.setPendingFileId(null);
+                    appUser.setPendingOriginalFileName(null);
+                    appUser.setPendingFileType(null); // Очищаємо тип
+                    appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+                    appUserDAO.save(appUser);
+                    if (callbackQuery != null && callbackQuery.getId() != null) {
+                        producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка: відео не знайдено");
+                    }
+                    return;
+                }
+
+                byte[] fileData;
+                try {
+                    fileData = fileService.downloadFileAsByteArray(fileIdForConversion);
+                    if (fileData == null || fileData.length == 0) throw new UploadFileException("Завантажений ВІДЕО файл порожній.");
+                    log.info("Successfully downloaded pending VIDEO for conversion: FileID='{}', OriginalName='{}', Size={}", fileIdForConversion, originalFileNameForConversion, fileData.length);
+                } catch (Exception e) {
+                    // ... (обробка помилки завантаження, як для фото, але з уточненим повідомленням)
+                    log.error("Failed to download pending VIDEO file_id {} for conversion: {}", fileIdForConversion, e.getMessage(), e);
+                    sendAnswer("Не вдалося завантажити ВІДЕО для конвертації...", chatId);
+                    appUser.setPendingFileId(null);
+                    appUser.setPendingOriginalFileName(null);
+                    appUser.setPendingFileType(null);
+                    appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+                    appUserDAO.save(appUser);
+                    if (callbackQuery != null && callbackQuery.getId() != null) {
+                        producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка завантаження відео");
+                    }
+                    return;
+                }
+
+                final String finalOriginalVideoName = originalFileNameForConversion;
+                ByteArrayResource videoFileResource = new ByteArrayResource(fileData) {
+                    @Override public String getFilename() { return finalOriginalVideoName; }
+                };
+
+                String videoConverterApiEndpoint = "/api/video/convert"; // Переконайся, що цей ендпоінт приймає 'format'
+                boolean videoConversionSuccess = false;
+
+                sendAnswer("Розпочинаю конвертацію ВІДЕО '" + originalFileNameForConversion + "' у формат " + targetFormat.toUpperCase() + "...", chatId);
+
+                try {
+                    ResponseEntity<byte[]> response = converterClientService.convertVideoFile(videoFileResource, originalFileNameForConversion, targetFormat, videoConverterApiEndpoint);
+
+                    if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                        byte[] convertedVideoData = response.getBody();
+                        String baseName = originalFileNameForConversion.contains(".") ?
+                                originalFileNameForConversion.substring(0, originalFileNameForConversion.lastIndexOf('.')) :
+                                originalFileNameForConversion;
+                        String convertedVideoFileName = "converted_" + baseName + "." + targetFormat;
+
+                        // Надсилаємо як документ
+                        producerService.producerSendDocumentDTO(DocumentToSendDTO.builder()
+                                .chatId(chatId.toString())
+                                .documentBytes(convertedVideoData)
+                                .fileName(convertedVideoFileName)
+                                .caption("Сконвертоване відео: " + originalFileNameForConversion + " -> " + targetFormat.toUpperCase())
+                                .build());
+                        videoConversionSuccess = true;
+                        log.info("Successfully converted and sent VIDEO as document '{}' (original: '{}') to format '{}' for user {}",
+                                convertedVideoFileName, originalFileNameForConversion, targetFormat, appUser.getTelegramUserId());
+                    } else {
+                        log.error("VIDEO conversion failed for '{}' to {}. Status: {}.",
+                                originalFileNameForConversion, targetFormat, response.getStatusCode());
+                        sendAnswer("Помилка конвертації ВІДЕО в " + targetFormat.toUpperCase() + ". Статус: " + response.getStatusCode(), chatId);
+                    }
+                } catch (Exception e) {
+                    log.error("Critical exception during VIDEO conversion for file {}: {}", originalFileNameForConversion, e.getMessage(), e);
+                    sendAnswer("Критична помилка сервісу конвертації для вашого ВІДЕО.", chatId);
+                } finally {
+                    appUser.setPendingFileId(null);
+                    appUser.setPendingOriginalFileName(null);
+                    appUser.setPendingFileType(null); // Очищаємо тип
+
+                    String callbackResponseMessage;
+                    if (videoConversionSuccess) {
+                        sendPostConversionMessage(chatId);
+                        callbackResponseMessage = "Відео конвертовано в " + targetFormat.toUpperCase() + "!";
+                    } else {
+                        sendAnswer("Не вдалося сконвертувати ВІДЕО. Спробуйте ще раз.", chatId);
+                        callbackResponseMessage = "Помилка конвертації відео";
+                    }
+                    appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+                    appUserDAO.save(appUser);
+                    if (callbackQuery != null && callbackQuery.getId() != null) {
+                        producerService.producerAnswerCallbackQuery(callbackQuery.getId(), callbackResponseMessage);
+                    }
+                }
+
+            } else if (callbackData.startsWith("format_select_") && "photo".equals(pendingFileType)) {
+                // ОБРОБКА ВИБОРУ ФОРМАТУ ДЛЯ ФОТО (твій існуючий код)
+                String targetFormat = callbackData.substring("format_select_".length());
+                log.info("User selected PHOTO format '{}'. Pending file type: {}", targetFormat, pendingFileType);
+
+                String fileIdForConversion = appUser.getPendingFileId();
+                String originalFileNameForConversion = appUser.getPendingOriginalFileName();
+
+                if (fileIdForConversion == null || originalFileNameForConversion == null) {
+                    log.error("Pending file ID or original name is null for user {} in AWAITING_TARGET_FORMAT_SELECTION state.", appUser.getTelegramUserId());
+                    sendAnswer("Помилка: не можу знайти файл, який ви хотіли конвертувати. Будь ласка, надішліть його знову.", chatId);
+                    // Скидаємо стан і "завислі" дані
+                    appUser.setPendingFileId(null);
+                    appUser.setPendingOriginalFileName(null);
+                    appUser.setState(AWAITING_FILE_FOR_CONVERSION); // Повертаємо до стану очікування файлу
+                    appUserDAO.save(appUser);
+                    if (callbackQuery != null && callbackQuery.getId() != null) { // Додано
+                        producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка: файл не знайдено");
+                    }
+                    return;
+                }
+
+                log.info("User {} selected format '{}' for file_id '{}', original_name '{}'",
+                        appUser.getTelegramUserId(), targetFormat, fileIdForConversion, originalFileNameForConversion);
+
+                byte[] fileData;
+                try {
+                    // 1. Завантажити fileData за fileIdForConversion
+                    fileData = fileService.downloadFileAsByteArray(fileIdForConversion);
+                    if (fileData == null || fileData.length == 0) {
+                        throw new UploadFileException("Завантажений файл для конвертації порожній або відсутній.");
+                    }
+                    log.info("Successfully downloaded pending file for conversion: FileID='{}', OriginalName='{}', Size={}",
+                            fileIdForConversion, originalFileNameForConversion, fileData.length);
+                } catch (Exception e) {
+                    log.error("Failed to download pending file_id {} for conversion: {}", fileIdForConversion, e.getMessage(), e);
+                    sendAnswer("Не вдалося завантажити файл для конвертації. Спробуйте надіслати його знову.", chatId);
+                    // Скидаємо стан і "завислі" дані
+                    appUser.setPendingFileId(null);
+                    appUser.setPendingOriginalFileName(null);
+                    appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+                    appUserDAO.save(appUser);
+                    appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+                    appUserDAO.save(appUser);
+                    if (callbackQuery != null && callbackQuery.getId() != null) { // Додано
+                        producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка завантаження файлу");
+                    }
+                    return;
+                }
+
+                // 2. Створити ByteArrayResource
+                final String finalOriginalName = originalFileNameForConversion; // для використання в лямбді
+                ByteArrayResource fileResource = new ByteArrayResource(fileData) {
+
+                    @Override
+                    public String getFilename() {
+                        return finalOriginalName;
+                    }
+
+                };
+                String photoConverterApiEndpoint = "/api/convert";
+                boolean photoConversionSuccess = false;
+
+                sendAnswer("Розпочинаю конвертацію ФОТО '" + originalFileNameForConversion + "' у формат " + targetFormat.toUpperCase() + "...", chatId);
+
+                try {
+                    // 3. Викликати converterClientService.convertFile(...) з новим targetFormat
+                    ResponseEntity<byte[]> response = converterClientService.convertFile(fileResource, originalFileNameForConversion, targetFormat, photoConverterApiEndpoint);
+
+                    // 4. Обробити відповідь, надіслати сконвертований файл
+                    if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                        byte[] convertedFileData = response.getBody();
+                        String baseName = originalFileNameForConversion.contains(".") ?
+                                originalFileNameForConversion.substring(0, originalFileNameForConversion.lastIndexOf('.')) :
+                                originalFileNameForConversion;
+                        // Переконуємося, що ім'я файлу має правильне розширення
+                        String convertedFileNameWithTargetExt = "converted_" + baseName + "." + targetFormat;
+
+                        producerService.producerSendDocumentDTO(DocumentToSendDTO.builder()
+                                .chatId(chatId.toString())
+                                .documentBytes(convertedFileData)
+                                .fileName(convertedFileNameWithTargetExt)
+                                .caption("Сконвертоване фото: " + originalFileNameForConversion + " -> " + targetFormat.toUpperCase() +
+                                        "\nТип файлу: " + targetFormat.toUpperCase())
+                                .build());
+                        photoConversionSuccess = true;
+                        log.info("Successfully converted and sent PHOTO as document '{}' (original: '{}') to format '{}' for user {}",
+                                convertedFileNameWithTargetExt, originalFileNameForConversion, targetFormat, appUser.getTelegramUserId());
+
+                    } else {
+                        log.error("PHOTO conversion failed for '{}' to {}. Status: {}. Response body present: {}",
+                                originalFileNameForConversion, targetFormat,
+                                response.getStatusCode(), response.getBody() != null);
+                        sendAnswer("Помилка конвертації ФОТО в " + targetFormat.toUpperCase() + ". Статус: " + response.getStatusCode(), chatId);
+                    }
+                } catch (Exception e) {
+                    log.error("Critical exception during PHOTO conversion call for file {}: {}", originalFileNameForConversion, e.getMessage(), e);
+                    sendAnswer("Критична помилка сервісу конвертації для вашого ФОТО.", chatId);
+                } finally {
+                    // 6. Очистити pending поля
+                    appUser.setPendingFileId(null);
+                    appUser.setPendingOriginalFileName(null);
+                    appUser.setPendingFileType(null); // <--- ОЧИЩЕННЯ ТИПУ ФАЙЛУ ТУТ!
+
+                    String callbackResponseMessage;
+                    if (photoConversionSuccess) {
+                        // 5. Надіслати повідомлення sendPostConversionMessage(chatId); у разі успіху
+                        sendPostConversionMessage(chatId);
+                        callbackResponseMessage = "Фото конвертовано в " + targetFormat.toUpperCase() + "!";
+                    } else {
+                        sendAnswer("Не вдалося сконвертувати ФОТО. Спробуйте ще раз або оберіть інший файл/формат.", chatId);
+                        callbackResponseMessage = "Помилка конвертації фото";
+                    }
+
+                    // 7. Встановити стан (завжди повертаємо в очікування нового файлу для конвертації в цьому режимі)
+                    appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+                    // 8. Зберегти appUser
+                    appUserDAO.save(appUser);
+
+                    // 9. "Відповісти" на CallbackQuery
+                    if (callbackQuery != null && callbackQuery.getId() != null) {
+                        producerService.producerAnswerCallbackQuery(callbackQuery.getId(), callbackResponseMessage);
+                    }
+                }
+                // Не забудь очистити appUser.setPendingFileType(null); у блоці finally для фото також.
+
+            } else {
+                // Невідомий callbackData або невідповідність pendingFileType
+                log.warn("Mismatch or unknown callback_data: '{}' with pendingFileType: '{}' for user {} in state {}",
+                        callbackData, pendingFileType, appUser.getTelegramUserId(), appUser.getState());
+                sendAnswer("Сталася незрозуміла помилка з вибором формату. Спробуйте знову.", chatId);
                 appUser.setPendingFileId(null);
                 appUser.setPendingOriginalFileName(null);
-                appUser.setState(AWAITING_FILE_FOR_CONVERSION); // Повертаємо до стану очікування файлу
+                appUser.setPendingFileType(null);
+                appUser.setState(AWAITING_FILE_FOR_CONVERSION); // Або BASIC_STATE
                 appUserDAO.save(appUser);
-                appUser.setState(AWAITING_FILE_FOR_CONVERSION); // Повертаємо до стану очікування файлу
-                appUserDAO.save(appUser);
-                if (callbackQuery != null && callbackQuery.getId() != null) { // Додано
-                    producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка: файл не знайдено");
-                }
-                return;
-            }
-
-            log.info("User {} selected format '{}' for file_id '{}', original_name '{}'",
-                    appUser.getTelegramUserId(), targetFormat, fileIdForConversion, originalFileNameForConversion);
-
-            byte[] fileData;
-            try {
-                // 1. Завантажити fileData за fileIdForConversion
-                fileData = fileService.downloadFileAsByteArray(fileIdForConversion);
-                if (fileData == null || fileData.length == 0) {
-                    throw new UploadFileException("Завантажений файл для конвертації порожній або відсутній.");
-                }
-                log.info("Successfully downloaded pending file for conversion: FileID='{}', OriginalName='{}', Size={}",
-                        fileIdForConversion, originalFileNameForConversion, fileData.length);
-            } catch (Exception e) {
-                log.error("Failed to download pending file_id {} for conversion: {}", fileIdForConversion, e.getMessage(), e);
-                sendAnswer("Не вдалося завантажити файл для конвертації. Спробуйте надіслати його знову.", chatId);
-                // Скидаємо стан і "завислі" дані
-                appUser.setPendingFileId(null);
-                appUser.setPendingOriginalFileName(null);
-                appUser.setState(AWAITING_FILE_FOR_CONVERSION);
-                appUserDAO.save(appUser);
-                appUser.setState(AWAITING_FILE_FOR_CONVERSION);
-                appUserDAO.save(appUser);
-                if (callbackQuery != null && callbackQuery.getId() != null) { // Додано
-                    producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка завантаження файлу");
-                }
-                return;
-            }
-
-            // 2. Створити ByteArrayResource
-            final String finalOriginalName = originalFileNameForConversion; // для використання в лямбді
-            ByteArrayResource fileResource = new ByteArrayResource(fileData) {
-                @Override
-                public String getFilename() {
-                    return finalOriginalName;
-                }
-            };
-
-            String converterApiEndpoint = "/api/convert"; // Для фото використовуємо цей ендпоінт
-            boolean conversionSuccess = false;
-
-            // Інформативне повідомлення користувачеві
-            sendAnswer("Розпочинаю конвертацію фото '" + originalFileNameForConversion + "' у формат " + targetFormat.toUpperCase() + "...", chatId);
-
-            try {
-                // 3. Викликати converterClientService.convertFile(...) з новим targetFormat
-                ResponseEntity<byte[]> response = converterClientService.convertFile(fileResource, originalFileNameForConversion, targetFormat, converterApiEndpoint);
-
-                // 4. Обробити відповідь, надіслати сконвертований файл
-                if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-                    byte[] convertedFileData = response.getBody();
-                    String baseName = originalFileNameForConversion.contains(".") ?
-                            originalFileNameForConversion.substring(0, originalFileNameForConversion.lastIndexOf('.')) :
-                            originalFileNameForConversion;
-                    // Переконуємося, що ім'я файлу має правильне розширення
-                    String convertedFileNameWithTargetExt = "converted_" + baseName + "." + targetFormat;
-
-                    producerService.producerSendDocumentDTO(DocumentToSendDTO.builder() // <--- ЗМІНЕНО ТУТ
-                            .chatId(chatId.toString())
-                            .documentBytes(convertedFileData) // <--- Поле тепер documentBytes
-                            .fileName(convertedFileNameWithTargetExt) // <--- Ім'я файлу з новим розширенням
-                            .caption("Сконвертовано: " + originalFileNameForConversion + " -> " + targetFormat.toUpperCase() +
-                                    "\nТип файлу: " + targetFormat.toUpperCase()) // Додамо тип файлу в підпис для ясності
-                            .build());
-                    conversionSuccess = true;
-                    log.info("Successfully converted and sent image as document '{}' (original: '{}') to format '{}' for user {}",
-                            convertedFileNameWithTargetExt, originalFileNameForConversion, targetFormat, appUser.getTelegramUserId());
-
-                } else {
-                    log.error("Conversion failed for photo '{}' to {}. Status: {}. Response body present: {}",
-                            originalFileNameForConversion, targetFormat,
-                            response.getStatusCode(), response.getBody() != null);
-                    sendAnswer("Помилка конвертації фото в " + targetFormat.toUpperCase() + ". Статус: " + response.getStatusCode(), chatId);
-                }
-            } catch (Exception e) {
-                log.error("Critical exception during photo conversion call for file {}: {}", originalFileNameForConversion, e.getMessage(), e);
-                sendAnswer("Критична помилка сервісу конвертації для вашого фото.", chatId);
-            } finally {
-                // 6. Очистити pending поля
-                appUser.setPendingFileId(null);
-                appUser.setPendingOriginalFileName(null);
-
-                String callbackResponseMessage = null; // Оголошуємо змінну для повідомлення
-
-                if (conversionSuccess) {
-                    // 5. Надіслати повідомлення sendPostConversionMessage(chatId); у разі успіху
-                    sendPostConversionMessage(chatId);
-                    callbackResponseMessage = "Конвертовано в " + targetFormat.toUpperCase() + "!";
-                } else {
-                    sendAnswer("Не вдалося сконвертувати файл. Спробуйте ще раз або оберіть інший файл/формат.", chatId);
-                    callbackResponseMessage = "Помилка конвертації";
-                }
-
-                // 7. Встановити стан (завжди повертаємо в очікування нового файлу для конвертації в цьому режимі)
-                appUser.setState(AWAITING_FILE_FOR_CONVERSION);
-                // 8. Зберегти appUser
-                appUserDAO.save(appUser);
-
-                // 9. "Відповісти" на CallbackQuery
-                if (callbackQuery != null && callbackQuery.getId() != null) { // Додаткова перевірка
-                    producerService.producerAnswerCallbackQuery(callbackQuery.getId(), callbackResponseMessage);
+                if (callbackQuery != null && callbackQuery.getId() != null) {
+                    producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка обробки");
                 }
             }
 
@@ -871,8 +1006,6 @@ public class MainServiceImpl implements MainService {
             }
         } else {
             // Інший CallbackQuery, який ми не очікуємо тут
-            log.warn("Received unexpected callback_data '{}' from user {} in state {}",
-                    callbackData, appUser.getTelegramUserId(), appUser.getState());
             log.warn("Received unexpected callback_data '{}' from user {} in state {}",
                     callbackData, appUser.getTelegramUserId(), appUser.getState());
             if (callbackQuery != null && callbackQuery.getId() != null) { // Додано
