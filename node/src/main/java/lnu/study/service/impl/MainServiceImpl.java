@@ -364,58 +364,39 @@ public class MainServiceImpl implements MainService {
         saveRawData(update);
         var appUser = findOrSaveAppUser(update);
         if (appUser == null) return;
+
         log.info("ENTERING processVoiceMessage for user {}. Current state: {}", appUser.getTelegramUserId(), appUser.getState());
         var chatId = update.getMessage().getChatId();
         Message message = update.getMessage();
         Voice telegramVoice = message.getVoice();
 
         if (telegramVoice == null) {
-            sendAnswer("Очікувалося голосове, але воно відсутнє.", chatId); return;
+            sendAnswer("Очікувалося голосове повідомлення, але воно відсутнє.", chatId);
+            return;
         }
 
         if (AWAITING_FILE_FOR_CONVERSION.equals(appUser.getState())) {
             if (!appUser.isActive()) {
-                sendAnswer("Активуйте акаунт.", chatId); return;
+                sendAnswer("Активуйте акаунт для конвертації.", chatId);
+                return;
             }
+
+            // Голосові зазвичай у форматі .ogg або подібному
             String originalFileName = "voice_" + appUser.getTelegramUserId() + "_" + System.currentTimeMillis() + ".ogg";
             String fileId = telegramVoice.getFileId();
-            byte[] fileData;
-            try {
-                fileData = fileService.downloadFileAsByteArray(fileId);
-                if (fileData == null || fileData.length == 0) throw new UploadFileException("Голосове порожнє.");
-            } catch (Exception e) {
-                sendAnswer("Не вдалося завантажити голосове. /cancel", chatId); return;
-            }
-            ByteArrayResource fileResource = new ByteArrayResource(fileData) {
-                @Override public String getFilename() { return originalFileName; }
-            };
-            String targetFormat = TARGET_VOICE_CONVERT_FORMAT;
-            String converterApiEndpoint = "/api/audio/convert";
-            boolean conversionSuccess = false;
-            sendAnswer("Голосове '" + originalFileName + "' отримано. Конвертую в " + targetFormat.toUpperCase() + "...", chatId);
-            try {
-                ResponseEntity<byte[]> response = converterClientService.convertAudioFile(fileResource, originalFileName, targetFormat, converterApiEndpoint);
-                if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-                    byte[] convertedFileData = response.getBody();
-                    String baseName = originalFileName.contains(".") ? originalFileName.substring(0, originalFileName.lastIndexOf('.')) : originalFileName;
-                    String convertedFileName = "converted_" + baseName + "." + targetFormat;
-                    producerService.producerSendAudioDTO(AudioToSendDTO.builder()
-                            .chatId(chatId.toString()).audioBytes(convertedFileData).fileName(convertedFileName).caption("Сконвертоване: " + originalFileName).build());
-                    // sendAnswer("Голосове успішно сконвертовано в " + targetFormat.toUpperCase() + "!", chatId); // Перенесено
-                    conversionSuccess = true;
-                } else {
-                    sendAnswer("Помилка конвертації голосового. Статус: " + response.getStatusCode(), chatId);
-                }
-            } catch (Exception e) {
-                sendAnswer("Критична помилка сервісу конвертації голосового.", chatId);
-            } finally {
-                if (conversionSuccess) {
-                    sendPostConversionMessage(chatId);
-                }
-                // Стан не змінюємо
-            }
+
+            appUser.setPendingFileId(fileId);
+            appUser.setPendingOriginalFileName(originalFileName);
+            appUser.setPendingFileType("audio"); // Обробляємо як загальне аудіо
+            appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
+            appUserDAO.save(appUser);
+
+            sendAudioFormatSelectionMessage(chatId); // Та сама клавіатура, що і для аудіофайлів
+            log.info("Voice message received from user {}. Switched to AWAITING_TARGET_FORMAT_SELECTION. FileID: {}, FileName: {}",
+                    appUser.getTelegramUserId(), fileId, originalFileName);
+            return;
         } else {
-            sendAnswer("Голосове отримано, але бот не в режимі конвертації. Використайте /convert_file, щоб увімкнути цей режим.", chatId);
+            sendAnswer("Голосове повідомлення отримано, але бот не в режимі конвертації. Використайте /convert_file.", chatId);
         }
     }
 
@@ -519,6 +500,68 @@ public class MainServiceImpl implements MainService {
         log.info("Sent video format selection keyboard to chat_id: {}", chatId);
     }
 
+
+    //TODO: dlya perevirky
+
+
+    @Override
+    @Transactional
+    public void processAudioFileMessage(Update update) {
+        saveRawData(update);
+        var appUser = findOrSaveAppUser(update);
+        if (appUser == null) return;
+
+        var chatId = update.getMessage().getChatId();
+        Message message = update.getMessage();
+        org.telegram.telegrambots.meta.api.objects.Audio telegramAudio = message.getAudio();
+
+        if (telegramAudio == null) {
+            sendAnswer("Очікувався аудіофайл, але він відсутній.", chatId);
+            return;
+        }
+
+        log.info("ENTERING processAudioFileMessage for user {}. File: {}, MIME: {}, Duration: {}",
+                appUser.getTelegramUserId(), telegramAudio.getFileName(), telegramAudio.getMimeType(), telegramAudio.getDuration());
+
+        if (AWAITING_FILE_FOR_CONVERSION.equals(appUser.getState())) {
+            if (!appUser.isActive()) {
+                sendAnswer("Будь ласка, активуйте свій акаунт для конвертації.", chatId);
+                return;
+            }
+
+            String originalFileName = telegramAudio.getFileName();
+            if (originalFileName == null || originalFileName.isEmpty() || !originalFileName.contains(".")) {
+                String ext = "dat";
+                if (telegramAudio.getMimeType() != null) {
+                    if (telegramAudio.getMimeType().contains("mpeg")) ext = "mp3";
+                    else if (telegramAudio.getMimeType().contains("ogg")) ext = "ogg";
+                    else if (telegramAudio.getMimeType().contains("wav")) ext = "wav";
+                    else if (telegramAudio.getMimeType().contains("aac")) ext = "aac";
+                    else if (telegramAudio.getMimeType().contains("flac")) ext = "flac";
+                    // Можна додати ще MIME типи, наприклад, audio/x-m4a для m4a
+                }
+                originalFileName = "audio_" + appUser.getTelegramUserId() + "_" + System.currentTimeMillis() + "." + ext;
+                log.info("Generated filename for audio message: {}", originalFileName);
+            }
+
+            String fileId = telegramAudio.getFileId();
+
+            appUser.setPendingFileId(fileId);
+            appUser.setPendingOriginalFileName(originalFileName);
+            appUser.setPendingFileType("audio"); // <--- Встановлюємо тип "audio"
+            appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
+            appUserDAO.save(appUser);
+
+            sendAudioFormatSelectionMessage(chatId); // <--- Новий метод для вибору формату аудіо
+            log.info("Audio file received from user {}. Switched to AWAITING_TARGET_FORMAT_SELECTION. FileID: {}, FileName: {}",
+                    appUser.getTelegramUserId(), fileId, originalFileName);
+            return;
+
+        } else {
+            sendAnswer("Аудіофайл '" + (telegramAudio.getFileName() != null ? telegramAudio.getFileName() : "невідомий") +
+                    "' отримано, але бот не в режимі конвертації. Використайте /convert_file.", chatId);
+        }
+    }
     @Override
     @Transactional
     public void processAudioMessage(Update update) {
@@ -849,7 +892,107 @@ public class MainServiceImpl implements MainService {
                     }
                 }
 
-            } else if (callbackData.startsWith("format_select_") && "photo".equals(pendingFileType)) {
+            }else if (callbackData.startsWith("format_select_audio_") && "audio".equals(pendingFileType)) { // <--- НОВА ГІЛКА ДЛЯ АУДІО
+                // ОБРОБКА ВИБОРУ ФОРМАТУ ДЛЯ АУДІО
+                String targetFormat = callbackData.substring("format_select_audio_".length());
+                log.info("User selected AUDIO format '{}'. Pending file type: {}", targetFormat, pendingFileType);
+
+                String fileIdForConversion = appUser.getPendingFileId();
+                String originalFileNameForConversion = appUser.getPendingOriginalFileName();
+
+                if (fileIdForConversion == null || originalFileNameForConversion == null) {
+                    log.error("Pending AUDIO file ID or original name is null for user {}...", appUser.getTelegramUserId());
+                    sendAnswer("Помилка: не можу знайти АУДІОФАЙЛ, який ви хотіли конвертувати...", chatId);
+                    appUser.setPendingFileId(null);
+                    appUser.setPendingOriginalFileName(null);
+                    appUser.setPendingFileType(null);
+                    appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+                    appUserDAO.save(appUser);
+                    if (callbackQuery != null && callbackQuery.getId() != null) {
+                        producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка: аудіофайл не знайдено");
+                    }
+                    return;
+                }
+
+                byte[] fileData;
+                try {
+                    fileData = fileService.downloadFileAsByteArray(fileIdForConversion);
+                    if (fileData == null || fileData.length == 0) throw new UploadFileException("Завантажений АУДІОФАЙЛ порожній.");
+                    log.info("Successfully downloaded pending AUDIO for conversion: FileID='{}', OriginalName='{}', Size={}", fileIdForConversion, originalFileNameForConversion, fileData.length);
+                } catch (Exception e) {
+                    log.error("Failed to download pending AUDIO file_id {} for conversion: {}", fileIdForConversion, e.getMessage(), e);
+                    sendAnswer("Не вдалося завантажити АУДІОФАЙЛ для конвертації...", chatId);
+                    appUser.setPendingFileId(null);
+                    appUser.setPendingOriginalFileName(null);
+                    appUser.setPendingFileType(null);
+                    appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+                    appUserDAO.save(appUser);
+                    if (callbackQuery != null && callbackQuery.getId() != null) {
+                        producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка завантаження аудіо");
+                    }
+                    return;
+                }
+
+                final String finalOriginalAudioName = originalFileNameForConversion;
+                ByteArrayResource audioFileResource = new ByteArrayResource(fileData) {
+                    @Override public String getFilename() { return finalOriginalAudioName; }
+                };
+
+                String audioConverterApiEndpoint = "/api/audio/convert"; // Твій ендпоінт для аудіо
+                boolean audioConversionSuccess = false;
+
+                sendAnswer("Розпочинаю конвертацію АУДІО '" + originalFileNameForConversion + "' у формат " + targetFormat.toUpperCase() + "...", chatId);
+
+                try {
+                    // Переконайся, що convertAudioFile в ConverterClientServiceImpl
+                    // та AudioConverterController в converter-service приймають targetFormat
+                    ResponseEntity<byte[]> response = converterClientService.convertAudioFile(audioFileResource, originalFileNameForConversion, targetFormat, audioConverterApiEndpoint);
+
+                    if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                        byte[] convertedAudioData = response.getBody();
+                        String baseName = originalFileNameForConversion.contains(".") ?
+                                originalFileNameForConversion.substring(0, originalFileNameForConversion.lastIndexOf('.')) :
+                                originalFileNameForConversion;
+                        String convertedAudioFileName = "converted_" + baseName + "." + targetFormat;
+
+                        // Надсилаємо як документ
+                        producerService.producerSendDocumentDTO(DocumentToSendDTO.builder()
+                                .chatId(chatId.toString())
+                                .documentBytes(convertedAudioData)
+                                .fileName(convertedAudioFileName)
+                                .caption("Сконвертоване аудіо: " + originalFileNameForConversion + " -> " + targetFormat.toUpperCase())
+                                .build());
+                        audioConversionSuccess = true;
+                        log.info("Successfully converted and sent AUDIO as document '{}' (original: '{}') to format '{}' for user {}",
+                                convertedAudioFileName, originalFileNameForConversion, targetFormat, appUser.getTelegramUserId());
+                    } else {
+                        log.error("AUDIO conversion failed for '{}' to {}. Status: {}.",
+                                originalFileNameForConversion, targetFormat, response.getStatusCode());
+                        sendAnswer("Помилка конвертації АУДІО в " + targetFormat.toUpperCase() + ". Статус: " + response.getStatusCode(), chatId);
+                    }
+                } catch (Exception e) {
+                    log.error("Critical exception during AUDIO conversion for file {}: {}", originalFileNameForConversion, e.getMessage(), e);
+                    sendAnswer("Критична помилка сервісу конвертації для вашого АУДІО.", chatId);
+                } finally {
+                    appUser.setPendingFileId(null);
+                    appUser.setPendingOriginalFileName(null);
+                    appUser.setPendingFileType(null); // Очищаємо тип
+
+                    String callbackResponseMessage;
+                    if (audioConversionSuccess) {
+                        sendPostConversionMessage(chatId);
+                        callbackResponseMessage = "Аудіо конвертовано в " + targetFormat.toUpperCase() + "!";
+                    } else {
+                        sendAnswer("Не вдалося сконвертувати АУДІО. Спробуйте ще раз.", chatId);
+                        callbackResponseMessage = "Помилка конвертації аудіо";
+                    }
+                    appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+                    appUserDAO.save(appUser);
+                    if (callbackQuery != null && callbackQuery.getId() != null) {
+                        producerService.producerAnswerCallbackQuery(callbackQuery.getId(), callbackResponseMessage);
+                    }
+                }
+            }  else if (callbackData.startsWith("format_select_") && "photo".equals(pendingFileType)) {
                 // ОБРОБКА ВИБОРУ ФОРМАТУ ДЛЯ ФОТО (твій існуючий код)
                 String targetFormat = callbackData.substring("format_select_".length());
                 log.info("User selected PHOTO format '{}'. Pending file type: {}", targetFormat, pendingFileType);
@@ -1010,6 +1153,44 @@ public class MainServiceImpl implements MainService {
                     callbackData, appUser.getTelegramUserId(), appUser.getState());
             if (callbackQuery != null && callbackQuery.getId() != null) { // Додано
                 producerService.producerAnswerCallbackQuery(callbackQuery.getId(), null); // Просто прибрати годинник, без тексту
-            }        }
+            }
+        }
     }
+    private void sendAudioFormatSelectionMessage(Long chatId) {
+        SendMessage sendMessage = new SendMessage();
+        sendMessage.setChatId(chatId.toString());
+        sendMessage.setText("Оберіть цільовий формат для конвертації АУДІО:");
+
+        InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
+
+        // Приклади форматів для аудіо
+        List<InlineKeyboardButton> rowInline1 = new ArrayList<>();
+        rowInline1.add(InlineKeyboardButton.builder().text("MP3").callbackData("format_select_audio_mp3").build());
+        rowInline1.add(InlineKeyboardButton.builder().text("WAV").callbackData("format_select_audio_wav").build());
+
+        List<InlineKeyboardButton> rowInline2 = new ArrayList<>();
+        rowInline2.add(InlineKeyboardButton.builder().text("OGG (Vorbis)").callbackData("format_select_audio_ogg").build());
+        rowInline2.add(InlineKeyboardButton.builder().text("FLAC").callbackData("format_select_audio_flac").build());
+
+        List<InlineKeyboardButton> rowCancel = new ArrayList<>();
+        rowCancel.add(InlineKeyboardButton.builder().text("❌ Скасувати вибір").callbackData("cancel_format_selection").build());
+
+        // Можна додати M4A (AAC) або інші
+        // List<InlineKeyboardButton> rowInline3 = new ArrayList<>();
+        // rowInline3.add(InlineKeyboardButton.builder().text("M4A (AAC)").callbackData("format_select_audio_m4a").build());
+
+        rowsInline.add(rowInline1);
+        rowsInline.add(rowInline2);
+        rowsInline.add(rowCancel);
+
+        // if (!rowInline3.isEmpty()) rowsInline.add(rowInline3);
+
+        markupInline.setKeyboard(rowsInline);
+        sendMessage.setReplyMarkup(markupInline);
+
+        producerService.producerAnswer(sendMessage);
+        log.info("Sent audio format selection keyboard to chat_id: {}", chatId);
+    }
+
 }

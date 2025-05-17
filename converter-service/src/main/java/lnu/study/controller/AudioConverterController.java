@@ -110,7 +110,6 @@ public class AudioConverterController {
         // Добавляем поддержку различных аудиоформатов
         return format.equalsIgnoreCase("mp3") ||
                 format.equalsIgnoreCase("wav") ||
-                format.equalsIgnoreCase("aac") ||
                 format.equalsIgnoreCase("flac") ||
                 format.equalsIgnoreCase("ogg");
     }
@@ -121,8 +120,6 @@ public class AudioConverterController {
                 return "audio/mpeg";
             case "wav":
                 return "audio/wav";
-            case "aac":
-                return "audio/aac";
             case "flac":
                 return "audio/flac";
             case "ogg":

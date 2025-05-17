@@ -57,4 +57,9 @@ public class RabbitConfiguration {
     public Queue answerCallbackQueueListener() { // Назва методу може бути іншою, головне - назва черги
         return new Queue(ANSWER_CALLBACK_QUEUE);
     }
+
+    @Bean
+    public Queue audioMessageUpdateQueue() {
+        return new Queue(AUDIO_MESSAGE_UPDATE);
+    }
 }

@@ -111,7 +111,6 @@ public class VideoConverterController {
         return format.equalsIgnoreCase("mp4") ||
                 format.equalsIgnoreCase("mkv") ||
                 format.equalsIgnoreCase("mov") ||
-                format.equalsIgnoreCase("avi") ||
                 format.equalsIgnoreCase("webm");
     }
 
@@ -123,8 +122,6 @@ public class VideoConverterController {
                 return "video/x-matroska";
             case "mov":
                 return "video/quicktime";
-            case "avi":
-                return "video/x-msvideo";
             case "webm":
                 return "video/webm";
             default:

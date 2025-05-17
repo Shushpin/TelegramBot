@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import static lnu.study.model.RabbitQueue.CALLBACK_QUERY_UPDATE;
+import static lnu.study.model.RabbitQueue.AUDIO_MESSAGE_UPDATE; // Додай імпорт
+
 
 
 import static lnu.study.model.RabbitQueue.*;
@@ -65,6 +67,15 @@ public class ConsumerServiceImpl implements ConsumerService {
             log.error("Error processing callback query update: {}", e.getMessage(), e);
             // Тут можна додати логіку для надсилання повідомлення про помилку користувачеві,
             // або просто логувати, залежно від політики обробки помилок.
+        }
+    }
+    @RabbitListener(queues = AUDIO_MESSAGE_UPDATE)
+    public void consumeAudioFileMessageUpdate(@Payload Update update) {
+        log.debug("NODE: Audio File Message Update is received from queue {}", AUDIO_MESSAGE_UPDATE);
+        try {
+            mainService.processAudioFileMessage(update);
+        } catch (Exception e) {
+            log.error("Error processing audio file message update: {}", e.getMessage(), e);
         }
     }
 

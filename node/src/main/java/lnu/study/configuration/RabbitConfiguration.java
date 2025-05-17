@@ -56,4 +56,8 @@ public class RabbitConfiguration {
     public Queue answerCallbackQueue() {
         return new Queue(ANSWER_CALLBACK_QUEUE);
     }
+    @Bean
+    public Queue audioMessageUpdateQueueListener() {
+        return new Queue(AUDIO_MESSAGE_UPDATE);
+    }
 }

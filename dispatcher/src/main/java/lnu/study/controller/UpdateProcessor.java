@@ -63,8 +63,11 @@ public class UpdateProcessor {
         } else if (message.hasText()) {
             log.info("Processing text message from chat_id: {}: '{}'", message.getChat().getId(), message.getText());
             processTextMessage(update);
-        } else if (message.hasVoice()) { // ПЕРЕД іншими, більш загальними перевірками типу файлу
+        } else if (message.hasVoice()) {
             processVoiceMessage(update);
+        }else if (message.hasAudio()) { // <--- НОВА ГІЛКА
+            log.info("Processing audio file message from chat_id: {}", message.getChat().getId());
+            processAudioFileMessage(update);
         } else {
             log.warn("Unsupported message content type from chat_id: {}", message.getChat().getId());
             setUnsupportedMessageTypeView(update);
@@ -147,6 +150,11 @@ public class UpdateProcessor {
         } else {
             log.error("UpdateProcessor: CRITICAL - TelegramBot instance is NULL. Cannot send VideoToSendDTO to chat_id: {}", dto.getChatId());
         }
+    }
+    private void processAudioFileMessage(Update update) {
+        updateProducer.produce(AUDIO_MESSAGE_UPDATE, update);
+        log.info("Audio file message update for chat_id {} sent to RabbitMQ queue: {}",
+                update.getMessage().getChatId(), AUDIO_MESSAGE_UPDATE);
     }
 
 }

@@ -12,4 +12,5 @@ public interface MainService {
     void processVideoMessage(Update update);
 
     void processFormatSelectionCallback(Update update);
+    void processAudioFileMessage(Update update);
 }
