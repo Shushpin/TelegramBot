@@ -101,10 +101,10 @@ public class MainServiceImpl implements MainService {
                 appUser.setState(AWAITING_FILE_FOR_CONVERSION);
                 appUserDAO.save(appUser);
                 output = "Ви в режимі конвертації. Надішліть файл для обробки:\n" +
-                        "- DOCX (в PDF)\n" +
-                        "- Фото (в PNG)\n" +
-                        "- Голосове (в " + TARGET_VOICE_CONVERT_FORMAT.toUpperCase() + ")\n" +
-                        "- Відео (в " + TARGET_VIDEO_CONVERT_FORMAT.toUpperCase() + ").\n\n" +
+                        "- Фото\n" +
+                        "- Відео\n" +
+                        "- Голосове або аудіо файл\n" +
+                        "- DOCX (в PDF чи ODT,конвертація може зайняти до 5 хвилин) \n\n" +
                         "Для виходу з режиму конвертації: /cancel\n" +
                         "Для переходу в режим файлообмінника: /generate_link";
             }
@@ -226,10 +226,17 @@ public class MainServiceImpl implements MainService {
 
                 try {
                     if (isDocx) {
-                        targetFormat = "pdf";
-                        converterApiEndpoint = "/api/document/convert";
-                        fileTypeDescription = "Документ";
-                        response = converterClientService.convertFile(fileResource, finalOriginalFileName, targetFormat, converterApiEndpoint);
+                        log.info("DOCX received from user {}. FileID: {}, FileName: {}. Switching to AWAITING_TARGET_FORMAT_SELECTION for 'document'.",
+                                appUser.getTelegramUserId(), fileId, originalFileName);
+
+                        appUser.setPendingFileId(fileId);
+                        appUser.setPendingOriginalFileName(originalFileName);
+                        appUser.setPendingFileType("document"); // Встановлюємо тип "document"
+                        appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
+                        appUserDAO.save(appUser);
+
+                        sendDocumentFormatSelectionMessage(chatId); // Наш новий метод для показу клавіатури
+                        return; // Важливо завершити тут, очікуємо вибір формату
                     } else if (isPhotoAsDocument) { // <--- ОСЬ ЦЯ ГІЛКА ЗМІНЮЄТЬСЯ
                         log.info("Photo received as document from user {}. Switching to AWAITING_TARGET_FORMAT_SELECTION. FileID: {}, FileName: {}", appUser.getTelegramUserId(), fileId, finalOriginalFileName);
 
@@ -306,6 +313,35 @@ public class MainServiceImpl implements MainService {
                 } else { sendAnswer("Не вдалося обробити документ.", chatId); }
             } catch (Exception e) { sendAnswer("Помилка при збереженні документа.", chatId); }
         }
+    }
+
+    private void sendDocumentFormatSelectionMessage(Long chatId) {
+        SendMessage sendMessage = new SendMessage();
+        sendMessage.setChatId(chatId.toString());
+        sendMessage.setText("Оберіть цільовий формат для конвертації документа (.docx):");
+
+        InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
+
+        List<InlineKeyboardButton> rowInline1 = new ArrayList<>();
+        rowInline1.add(InlineKeyboardButton.builder().text("PDF").callbackData("format_select_doc_pdf").build());
+        rowInline1.add(InlineKeyboardButton.builder().text("ODT").callbackData("format_select_doc_odt").build());
+        // Можна додати інші формати, наприклад, конвертація в TXT або назад в DOCX (якщо потрібно перезберегти)
+        // rowInline1.add(InlineKeyboardButton.builder().text("DOCX").callbackData("format_select_doc_docx").build());
+        // rowInline1.add(InlineKeyboardButton.builder().text("TXT").callbackData("format_select_doc_txt").build());
+
+
+        List<InlineKeyboardButton> rowCancel = new ArrayList<>();
+        rowCancel.add(InlineKeyboardButton.builder().text("❌ Скасувати вибір").callbackData("cancel_format_selection").build());
+
+        rowsInline.add(rowInline1);
+        rowsInline.add(rowCancel);
+
+        markupInline.setKeyboard(rowsInline);
+        sendMessage.setReplyMarkup(markupInline);
+
+        producerService.producerAnswer(sendMessage);
+        log.info("Sent document format selection keyboard to chat_id: {}", chatId);
     }
 
     @Override
@@ -786,6 +822,10 @@ public class MainServiceImpl implements MainService {
             appUserDAO.save(appUser);
 
             sendAnswer("Вибір формату скасовано. Можете надіслати інший файл для конвертації, або використати /cancel для виходу з режиму конвертації.", chatId);
+            if (callbackQuery != null && callbackQuery.getId() != null) {
+                producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Вибір скасовано");
+            }
+            return; // <--- ВАЖЛИВО
         }
             // Перевіряємо, чи користувач у правильному стані і чи дані колбеку відповідають нашим очікуванням
         if (AWAITING_TARGET_FORMAT_SELECTION.equals(appUser.getState())) {
@@ -1118,11 +1158,109 @@ public class MainServiceImpl implements MainService {
                 }
                 // Не забудь очистити appUser.setPendingFileType(null); у блоці finally для фото також.
 
-            } else {
+            } else if (callbackData.startsWith("format_select_doc_") && "document".equals(pendingFileType)) {
+                String targetFormat = callbackData.substring("format_select_doc_".length());
+                log.info("User {} selected DOCUMENT format '{}'. Pending file type: {}", appUser.getTelegramUserId(), targetFormat, pendingFileType);
+
+                String fileIdForConversion = appUser.getPendingFileId();
+                String originalFileNameForConversion = appUser.getPendingOriginalFileName();
+
+                if (fileIdForConversion == null || originalFileNameForConversion == null) {
+                    log.error("Pending DOCUMENT file ID or original name is null for user {}...", appUser.getTelegramUserId());
+                    sendAnswer("Помилка: не можу знайти документ, який ви хотіли конвертувати. Будь ласка, надішліть його знову.", chatId);
+                    appUser.setPendingFileId(null);
+                    appUser.setPendingOriginalFileName(null);
+                    appUser.setPendingFileType(null);
+                    appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+                    appUserDAO.save(appUser);
+                    if (callbackQuery != null && callbackQuery.getId() != null) {
+                        producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка: документ не знайдено");
+                    }
+                    return;
+                }
+
+                byte[] fileData;
+                try {
+                    // Завантажуємо файл тут, перед конвертацією
+                    fileData = fileService.downloadFileAsByteArray(fileIdForConversion);
+                    if (fileData == null || fileData.length == 0) throw new UploadFileException("Завантажений ДОКУМЕНТ файл порожній.");
+                    log.info("Successfully downloaded pending DOCUMENT for conversion: FileID='{}', OriginalName='{}', Size={}", fileIdForConversion, originalFileNameForConversion, fileData.length);
+                } catch (Exception e) {
+                    log.error("Failed to download pending DOCUMENT file_id {} for conversion: {}", fileIdForConversion, e.getMessage(), e);
+                    sendAnswer("Не вдалося завантажити документ для конвертації. Спробуйте надіслати його знову.", chatId);
+                    appUser.setPendingFileId(null);
+                    appUser.setPendingOriginalFileName(null);
+                    appUser.setPendingFileType(null);
+                    appUser.setState(AWAITING_FILE_FOR_CONVERSION);
+                    appUserDAO.save(appUser);
+                    if (callbackQuery != null && callbackQuery.getId() != null) {
+                        producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка завантаження документа");
+                    }
+                    return;
+                }
+
+                final String finalOriginalDocName = originalFileNameForConversion;
+                ByteArrayResource docFileResource = new ByteArrayResource(fileData) {
+                    @Override public String getFilename() { return finalOriginalDocName; }
+                };
+
+                String docConverterApiEndpoint = "/api/document/convert"; // Використовуємо існуючий ендпоінт
+                boolean docConversionSuccess = false;
+                String callbackResponseMessage = "Помилка конвертації документа"; // За замовчуванням
+
+                sendAnswer("Файл '" + originalFileNameForConversion + "' отримано. Розпочинаю конвертацію у формат " + targetFormat.toUpperCase() + "...", chatId);
+
+                try {
+                    ResponseEntity<byte[]> response = converterClientService.convertFile(docFileResource, originalFileNameForConversion, targetFormat, docConverterApiEndpoint);
+
+                    if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                        byte[] convertedDocData = response.getBody();
+                        String baseName = originalFileNameForConversion.contains(".") ?
+                                originalFileNameForConversion.substring(0, originalFileNameForConversion.lastIndexOf('.')) :
+                                originalFileNameForConversion;
+                        String convertedDocFileName = "converted_" + baseName + "." + targetFormat;
+
+                        producerService.producerSendDocumentDTO(DocumentToSendDTO.builder()
+                                .chatId(chatId.toString())
+                                .documentBytes(convertedDocData)
+                                .fileName(convertedDocFileName)
+                                .caption("Сконвертований документ: " + originalFileNameForConversion + " -> " + targetFormat.toUpperCase())
+                                .build());
+                        docConversionSuccess = true;
+                        callbackResponseMessage = "Документ конвертовано в " + targetFormat.toUpperCase() + "!";
+                        log.info("Successfully converted and sent DOCUMENT '{}' (original: '{}') to format '{}' for user {}",
+                                convertedDocFileName, originalFileNameForConversion, targetFormat, appUser.getTelegramUserId());
+                    } else {
+                        log.error("DOCUMENT conversion failed for '{}' to {}. Status: {}. Response body present: {}",
+                                originalFileNameForConversion, targetFormat,
+                                response.getStatusCode(), response.getBody() != null);
+                        sendAnswer("Помилка конвертації документа в " + targetFormat.toUpperCase() + ". Статус: " + response.getStatusCode(), chatId);
+                        callbackResponseMessage = "Помилка конвертації: " + response.getStatusCode();
+                    }
+                } catch (Exception e) {
+                    log.error("Critical exception during DOCUMENT conversion for file {}: {}", originalFileNameForConversion, e.getMessage(), e);
+                    sendAnswer("Критична помилка сервісу конвертації для вашого документа.", chatId);
+                    callbackResponseMessage = "Критична помилка сервісу";
+                } finally {
+                    appUser.setPendingFileId(null);
+                    appUser.setPendingOriginalFileName(null);
+                    appUser.setPendingFileType(null);
+                    appUser.setState(AWAITING_FILE_FOR_CONVERSION); // Повертаємо до очікування нового файлу
+                    appUserDAO.save(appUser);
+
+                    if (docConversionSuccess) {
+                        sendPostConversionMessage(chatId); // Повідомлення про успішну конвертацію та що робити далі
+                    }
+                    // Відповідаємо на callback query в будь-якому випадку
+                    if (callbackQuery != null && callbackQuery.getId() != null) {
+                        producerService.producerAnswerCallbackQuery(callbackQuery.getId(), callbackResponseMessage);
+                    }
+                }
+                // КІНЕЦЬ НОВОГО БЛОКУ ДЛЯ ДОКУМЕНТІВ else {
                 // Невідомий callbackData або невідповідність pendingFileType
                 log.warn("Mismatch or unknown callback_data: '{}' with pendingFileType: '{}' for user {} in state {}",
                         callbackData, pendingFileType, appUser.getTelegramUserId(), appUser.getState());
-                sendAnswer("Сталася незрозуміла помилка з вибором формату. Спробуйте знову.", chatId);
+//                sendAnswer("Сталася незрозуміла помилка з вибором формату. Спробуйте знову.", chatId);
                 appUser.setPendingFileId(null);
                 appUser.setPendingOriginalFileName(null);
                 appUser.setPendingFileType(null);
