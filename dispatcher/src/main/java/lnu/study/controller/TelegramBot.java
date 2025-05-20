@@ -84,6 +84,7 @@ public class TelegramBot extends TelegramWebhookBot {
         commands.add(new BotCommand("/start", "Розпочати роботу"));
         commands.add(new BotCommand("/help", "Допомога та список команд"));
         commands.add(new BotCommand("/convert_file", "Увімкнути режим конвертації"));
+        commands.add(new BotCommand("/create_archive", "Увімкнути режим архіватора"));
         commands.add(new BotCommand("/generate_link", "Увімкнути режим файлообмінника"));
         commands.add(new BotCommand("/registration", "Реєстрація нового користувача"));
         commands.add(new BotCommand("/cancel", "Скасувати дію / Вийти з режиму"));

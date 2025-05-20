@@ -7,7 +7,8 @@ public enum ServiceCommand {
     START("/start"),
     RESEND_EMAIL("/resend_email"),
     CONVERT_FILE("/convert_file"),
-    GENERATE_LINK("/generate_link");;
+    GENERATE_LINK("/generate_link"), // Крапку з комою тут прибираємо, якщо додаємо нову команду після
+    CREATE_ARCHIVE("/create_archive"); // Нова команда, тепер вона остання, тому тут крапка з комою
 
     private final String value;
 
@@ -15,14 +16,16 @@ public enum ServiceCommand {
         this.value = value;
     }
 
-
     @Override
     public String toString() {
         return value;
     }
 
-
     public static ServiceCommand fromValue(String v) {
+        // Додамо перевірку на null для більшої надійності, якщо її ще немає
+        if (v == null) {
+            return null;
+        }
         for (ServiceCommand c : ServiceCommand.values()) {
             if (c.value.equals(v)) {
                 return c;
@@ -30,5 +33,4 @@ public enum ServiceCommand {
         }
         return null;
     }
-
 }

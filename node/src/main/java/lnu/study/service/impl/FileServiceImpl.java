@@ -1,5 +1,6 @@
 package lnu.study.service.impl;
 
+import lnu.study.entity.AppUser;
 import lnu.study.service.enums.LinkType;
 import lnu.study.utils.CryptoTool;
 import lombok.extern.log4j.Log4j2;
@@ -20,11 +21,17 @@ import lnu.study.entity.AppPhoto;
 import lnu.study.entity.BinaryContent;
 import lnu.study.exceptions.UploadFileException;
 import lnu.study.service.FileService;
+import lnu.study.dto.ArchiveFileDetailDTO; // З common-utils
 
+
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 @Log4j2
 @Service
@@ -217,6 +224,113 @@ public class FileServiceImpl implements FileService {
         } else {
             log.error("Failed to get file path for fileId {} during direct download. Response: {}", fileId, response);
             throw new UploadFileException("Bad response from telegram service when getting file path: " + response);
+        }
+    }
+
+    @Override
+    public byte[] createZipArchiveFromTelegramFiles(List<ArchiveFileDetailDTO> filesToArchiveDetails) throws IOException {
+        if (filesToArchiveDetails == null || filesToArchiveDetails.isEmpty()) {
+            log.warn("Список файлів для архівування порожній або null.");
+            return new byte[0]; // Повертаємо порожній масив байтів
+        }
+
+        log.info("Розпочинаю створення ZIP-архіву з {} файлів.", filesToArchiveDetails.size());
+
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+             ZipOutputStream zos = new ZipOutputStream(baos)) {
+
+            for (ArchiveFileDetailDTO fileDetail : filesToArchiveDetails) {
+                String telegramFileId = fileDetail.getTelegramFileId();
+                String originalFileNameInArchive = fileDetail.getOriginalFileName(); // Ім'я файлу в архіві
+
+                log.debug("Обробка файлу для архіву: originalName='{}', telegramFileId='{}'",
+                        originalFileNameInArchive, telegramFileId);
+
+                try {
+                    // Крок 1: Отримати шлях до файлу (file_path) з Telegram
+                    // Використовуємо існуючий метод getFilePathResponseEntity, який вже має логіку запиту до fileInfoUri
+                    // і використовує поле 'token', що інжектується через @Value.
+                    ResponseEntity<String> filePathResponse = getFilePathResponseEntity(telegramFileId);
+
+                    if (filePathResponse.getStatusCode() == HttpStatus.OK) {
+                        String telegramFilePath = getFilePathFromJsonResponse(filePathResponse); // Використовуємо існуючий метод
+
+                        // Крок 2: Завантажити файл за отриманим file_path
+                        // Використовуємо існуючий метод downloadFile
+                        byte[] fileBytes = downloadFile(telegramFilePath);
+
+                        if (fileBytes != null && fileBytes.length > 0) {
+                            // Крок 3: Додати файл до ZIP-архіву
+                            ZipEntry zipEntry = new ZipEntry(originalFileNameInArchive);
+                            zos.putNextEntry(zipEntry);
+                            zos.write(fileBytes);
+                            zos.closeEntry();
+                            log.info("Файл '{}' успішно додано до архіву.", originalFileNameInArchive);
+                        } else {
+                            log.warn("Файл '{}' (file_id: {}) порожній або не вдалося завантажити байти, пропускається.",
+                                    originalFileNameInArchive, telegramFileId);
+                        }
+                    } else {
+                        log.error("Не вдалося отримати шлях для файлу '{}' (file_id: {}). Статус: {}. Файл пропускається.",
+                                originalFileNameInArchive, telegramFileId, filePathResponse.getStatusCode());
+                    }
+                } catch (UploadFileException e) { // Твій UploadFileException вже є
+                    log.error("Помилка UploadFileException при обробці файлу '{}' (file_id: {}) для архіву: {}. Файл пропускається.",
+                            originalFileNameInArchive, telegramFileId, e.getMessage());
+                } catch (Exception e) { // Інші можливі винятки (напр. IOException при записі в ZIP)
+                    log.error("Загальна помилка при обробці файлу '{}' (file_id: {}) для архіву: {}. Файл пропускається.",
+                            originalFileNameInArchive, telegramFileId, e.getMessage(), e);
+                    // Якщо це IOException від zos.write/closeEntry, його потрібно прокинути або обробити інакше
+                    // В даному випадку, якщо один файл не вдалося додати, ми логуємо і продовжуємо з іншими.
+                    // Якщо потрібно зупинити весь процес - можна прокинути IOException далі.
+                }
+            }
+            zos.finish(); // Завершуємо запис даних ZIP (важливо перед baos.toByteArray())
+            log.info("ZIP-архів успішно створено в пам'яті.");
+            return baos.toByteArray();
+
+        } catch (IOException e) {
+            log.error("Критична помилка вводу-виводу при створенні ZIP-архіву: {}", e.getMessage(), e);
+            throw e; // Прокидаємо IOException, як зазначено в сигнатурі методу
+        }
+    }
+
+    @Override
+    @Transactional // Важливо для операцій збереження в БД
+    public AppDocument saveGeneratedArchive(AppUser appUser, byte[] archiveBytes, String archiveFileName) {
+        if (appUser == null || archiveBytes == null || archiveBytes.length == 0 || archiveFileName == null || archiveFileName.isBlank()) {
+            log.error("Некоректні параметри для збереження архіву: appUser={}, archiveBytes_length={}, archiveFileName='{}'",
+                    appUser, (archiveBytes != null ? archiveBytes.length : "null"), archiveFileName);
+            // Можна кинути виняток або повернути null, залежно від бажаної обробки помилок
+            throw new IllegalArgumentException("Некоректні параметри для збереження архіву.");
+        }
+
+        try {
+            // 1. Створюємо та зберігаємо BinaryContent
+            BinaryContent binaryContent = BinaryContent.builder()
+                    .fileAsArrayOfBytes(archiveBytes)
+                    .build();
+            BinaryContent savedBinaryContent = binaryContentDAO.save(binaryContent);
+            log.info("BinaryContent для архіву '{}' збережено, id={}", archiveFileName, savedBinaryContent.getId());
+
+            // 2. Створюємо та зберігаємо AppDocument
+            AppDocument archiveDocument = AppDocument.builder()
+                    .telegramFileId("archive_" + appUser.getTelegramUserId() + "_" + System.currentTimeMillis()) // Генеруємо унікальний ID
+                    .docName(archiveFileName)
+                    .binaryContent(savedBinaryContent)
+                    .mimeType("application/zip") // Стандартний MIME-тип для ZIP-архівів
+                    .fileSize((long) archiveBytes.length)
+                    .appUser(appUser) // Встановлюємо власника архіву
+                    .build();
+            AppDocument savedAppDocument = appDocumentDAO.save(archiveDocument);
+            log.info("AppDocument для архіву '{}' успішно збережено, id={}", archiveFileName, savedAppDocument.getId());
+
+            return savedAppDocument;
+        } catch (Exception e) {
+            log.error("Помилка при збереженні згенерованого архіву '{}' для користувача appUserId={}: {}",
+                    archiveFileName, appUser.getId(), e.getMessage(), e);
+            // Можна прокинути специфічний виняток, якщо потрібно обробити його вище
+            throw new UploadFileException("Помилка збереження згенерованого архіву в БД: " + e.getMessage(), e);
         }
     }
 }

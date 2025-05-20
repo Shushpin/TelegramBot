@@ -30,13 +30,15 @@ import org.telegram.telegrambots.meta.api.objects.Video;
 import org.telegram.telegrambots.meta.api.objects.Voice;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
+
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-
+import lnu.study.dto.ArchiveFileDetailDTO; // <--- НАШ НОВИЙ DTO
+import java.util.Map;                       // <--- Для ConcurrentHashMap
+import java.util.concurrent.ConcurrentHashMap; // <--- Для ConcurrentHashMap
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.List;
-
 
 import static lnu.study.entity.enums.UserState.*;
 import static lnu.study.service.enums.ServiceCommand.*;
@@ -51,12 +53,14 @@ public class MainServiceImpl implements MainService {
     private final AppUserService appUserService;
     private final ConverterClientService converterClientService;
 
+
     private static final String TARGET_VOICE_CONVERT_FORMAT = "mp3";
     private static final String TARGET_VIDEO_CONVERT_FORMAT = "mp4";
 
     private static final List<String> SUPPORTED_VIDEO_MIME_TYPES = Arrays.asList(
             "video/mp4", "video/quicktime", "video/x-msvideo", "video/x-matroska", "video/webm", "video/3gpp", "video/x-flv"
     );
+    private final Map<Long, List<ArchiveFileDetailDTO>> archivingSessions = new ConcurrentHashMap<>(); // <--- НОВЕ ПОЛЕ
 
 
     public MainServiceImpl(RawDataDAO rawDataDAO,
@@ -69,6 +73,19 @@ public class MainServiceImpl implements MainService {
         this.fileService = fileService;
         this.appUserService = appUserService;
         this.converterClientService = converterClientService;
+    }
+    // Метод для очищення сесії архівування
+    private void clearArchiveSession(Long appUserId) {
+        if (appUserId == null) {
+            log.warn("Спроба очистити сесію архівування для null appUserId.");
+            return;
+        }
+        List<ArchiveFileDetailDTO> removedSession = archivingSessions.remove(appUserId);
+        if (removedSession != null) {
+            log.info("Сесію архівування для користувача appUserId={} очищено. Видалено {} файлів з сесії.", appUserId, removedSession.size());
+        } else {
+            log.info("Для користувача appUserId={} не знайдено активної сесії архівування для очищення.", appUserId);
+        }
     }
 
     @Override
@@ -85,6 +102,27 @@ public class MainServiceImpl implements MainService {
         log.info("Processing text message '{}' from user_id: {}. Current user state: {}", text, appUser.getTelegramUserId(), userState);
         ServiceCommand serviceCommand = ServiceCommand.fromValue(text);
 
+        // Якщо користувач вже у стані архівування файлів
+        if (ARCHIVING_FILES.equals(userState)) {
+            if (CREATE_ARCHIVE.equals(serviceCommand)) { // Користувач повторно надсилає /create_archive
+                output = "Ви вже у режимі створення архіву. Будь ласка, надішліть файл або натисніть відповідну кнопку на клавіатурі (буде додано пізніше).";
+                sendAnswer(output, chatId); // Використовуй твій метод sendAnswer
+                return;
+            } else if (CANCEL.equals(serviceCommand)) { // Користувач надсилає /cancel
+                output = cancelProcess(appUser); // cancelProcess має викликати clearArchiveSession
+                sendAnswer(output, chatId);
+                return;
+            } else if (serviceCommand != null) { // Користувач надсилає іншу команду
+                output = "Ви зараз у режимі створення архіву. Щоб вийти, надішліть /cancel. " +
+                        "Інші команди недоступні. Будь ласка, надішліть файл.";
+                sendAnswer(output, chatId);
+                return;
+            } else { // Користувач надсилає текст, а не команду чи файл
+                output = "Будь ласка, надішліть файл для архіву або використайте команду /cancel для скасування.";
+                sendAnswer(output, chatId);
+                return;
+            }
+        }
         // Обробка команд, які змінюють стан або доступні в будь-якому стані (якщо це має сенс)
         if (CANCEL.equals(serviceCommand)) {
             output = cancelProcess(appUser);
@@ -92,6 +130,19 @@ public class MainServiceImpl implements MainService {
             output = switchToGenerateLinkMode(appUser);
         } else if (HELP.equals(serviceCommand)) { // /help доступна завжди
             output = help();
+        }else if (CREATE_ARCHIVE.equals(serviceCommand)) {
+            if (!appUser.isActive()) { // Перевірка, чи користувач активний
+                output = "Будь ласка, зареєструйтесь (/registration) та активуйте обліковий запис для створення архівів.";
+            } else {
+                clearArchiveSession(appUser.getId()); // Очистити попередню сесію, якщо була
+                archivingSessions.put(appUser.getId(), new ArrayList<>()); // Ініціалізувати нову сесію
+                appUser.setState(ARCHIVING_FILES); // Встановлюємо новий стан
+                appUserDAO.save(appUser); // Зберігаємо зміни стану користувача
+                log.info("User {} (appUserId={}) switched to ARCHIVING_FILES state.", appUser.getTelegramUserId(), appUser.getId());
+                output = "Розпочато сесію створення архіву. Надішліть перший файл або кілька файлів.\n" +
+                        "Для завершення та створення архіву буде відповідна кнопка (після надсилання файлу).\n" +
+                        "Для скасування сесії використайте /cancel.";
+            }
         }
         // Логіка залежно від стану
         else if (CONVERT_FILE.equals(serviceCommand)) {
@@ -174,6 +225,35 @@ public class MainServiceImpl implements MainService {
 
         var chatId = update.getMessage().getChatId();
         Message message = update.getMessage();
+        // ОБРОБКА ДОКУМЕНТІВ ДЛЯ АРХІВУВАННЯ
+        if (ARCHIVING_FILES.equals(appUser.getState())) {
+            Message currentMessage = update.getMessage(); // Отримуємо поточне повідомлення
+            Document document = currentMessage.getDocument();
+
+            if (document != null) {
+                String fileId = document.getFileId();
+                String originalFileName = document.getFileName();
+                if (originalFileName == null || originalFileName.isEmpty()) {
+                    originalFileName = "document_" + fileId; // Базове ім'я, якщо оригінальне відсутнє
+                }
+
+                ArchiveFileDetailDTO fileDetail = new ArchiveFileDetailDTO(fileId, originalFileName, "document");
+
+                // Додаємо файл до сесії користувача. appUser.getId() - це ID з нашої БД.
+                List<ArchiveFileDetailDTO> userArchiveFiles = archivingSessions.computeIfAbsent(appUser.getId(), k -> new ArrayList<>());
+                userArchiveFiles.add(fileDetail);
+                log.info("Додано документ '{}' (file_id: {}) до сесії архівування для користувача appUserId={}",
+                        originalFileName, fileId, appUser.getId());
+
+                // Надсилаємо повідомлення з кнопками
+                sendArchiveOptions(chatId, "Документ '" + originalFileName + "' отримано.");
+            } else {
+                // Це малоймовірно, якщо Telegram правильно маршрутизував як DocMessage, але для повноти
+                log.warn("Очікувався документ для архівування від користувача appUserId={}, але він відсутній.", appUser.getId());
+                sendAnswer("Помилка: очікувався документ, але його не знайдено. Спробуйте надіслати ще раз.", chatId);
+            }
+            return; // Важливо завершити обробку тут, щоб не виконувалася стандартна логіка збереження/конвертації
+        }
 
         if (AWAITING_FILE_FOR_CONVERSION.equals(appUser.getState())) {
             if (!appUser.isActive()) {
@@ -315,6 +395,44 @@ public class MainServiceImpl implements MainService {
         }
     }
 
+    private void sendArchiveOptions(Long chatId, String precedingText) {
+        SendMessage sendMessage = new SendMessage();
+        sendMessage.setChatId(chatId.toString());
+        sendMessage.setText(precedingText + "\n\nНадішліть наступний файл для архіву або створіть архів з вже відправлених файлів.");
+
+        InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
+
+        // Перший ряд кнопок
+        List<InlineKeyboardButton> rowMainButtons = new ArrayList<>();
+        InlineKeyboardButton addMoreButton = new InlineKeyboardButton();
+        addMoreButton.setText("➕ Надіслати ще файл");
+        addMoreButton.setCallbackData("ARCHIVE_ADD_MORE");
+
+        InlineKeyboardButton createArchiveButton = new InlineKeyboardButton();
+        createArchiveButton.setText("✅ Створити архів");
+        createArchiveButton.setCallbackData("ARCHIVE_CREATE_NOW");
+
+        rowMainButtons.add(addMoreButton);
+        rowMainButtons.add(createArchiveButton);
+        rowsInline.add(rowMainButtons); // Додаємо перший ряд
+
+        // Другий ряд для кнопки "Скасувати"
+        List<InlineKeyboardButton> rowCancelButton = new ArrayList<>(); // <--- НОВИЙ РЯД
+        InlineKeyboardButton cancelArchiveButton = new InlineKeyboardButton(); // <--- НОВА КНОПКА
+        cancelArchiveButton.setText("❌ Скасувати сесію"); // <--- ТЕКСТ КНОПКИ
+        cancelArchiveButton.setCallbackData("ARCHIVE_CANCEL_SESSION");    // <--- НОВІ CALLBACK-ДАНІ
+
+        rowCancelButton.add(cancelArchiveButton); // <--- ДОДАЄМО КНОПКУ В РЯД
+        rowsInline.add(rowCancelButton); // <--- ДОДАЄМО РЯД ДО КЛАВІАТУРИ
+
+        markupInline.setKeyboard(rowsInline);
+        sendMessage.setReplyMarkup(markupInline);
+
+        producerService.producerAnswer(sendMessage);
+        log.info("Надіслано опції архівування (з кнопкою скасування) до чату {}", chatId);
+    }
+
     private void sendDocumentFormatSelectionMessage(Long chatId) {
         SendMessage sendMessage = new SendMessage();
         sendMessage.setChatId(chatId.toString());
@@ -354,6 +472,36 @@ public class MainServiceImpl implements MainService {
 
         var chatId = update.getMessage().getChatId();
         Message message = update.getMessage();
+
+        if (ARCHIVING_FILES.equals(appUser.getState())) {
+            if (message.getPhoto() != null && !message.getPhoto().isEmpty()) {
+                PhotoSize photoSize = message.getPhoto().stream()
+                        .max(Comparator.comparing(PhotoSize::getFileSize))
+                        .orElse(null);
+
+                if (photoSize != null) {
+                    String fileId = photoSize.getFileId();
+                    // Генеруємо ім'я файлу для фото, оскільки Telegram його не надає стандартно
+                    String originalFileName = "photo_" + fileId + "_" + System.currentTimeMillis() + ".jpg";
+
+                    ArchiveFileDetailDTO fileDetail = new ArchiveFileDetailDTO(fileId, originalFileName, "photo");
+
+                    List<ArchiveFileDetailDTO> userArchiveFiles = archivingSessions.computeIfAbsent(appUser.getId(), k -> new ArrayList<>());
+                    userArchiveFiles.add(fileDetail);
+                    log.info("Додано фото '{}' (file_id: {}) до сесії архівування для користувача appUserId={}",
+                            originalFileName, fileId, appUser.getId());
+
+                    sendArchiveOptions(chatId, "Фото '" + originalFileName + "' отримано.");
+                } else {
+                    log.warn("Не вдалося отримати дані фото для архівування від користувача appUserId={}", appUser.getId());
+                    sendAnswer("Помилка: не вдалося обробити фото. Спробуйте надіслати ще раз.", chatId);
+                }
+            } else {
+                log.warn("Очікувалося фото для архівування від користувача appUserId={}, але його не знайдено в повідомленні.", appUser.getId());
+                sendAnswer("Помилка: очікувалося фото, але його не знайдено. Спробуйте надіслати ще раз.", chatId);
+            }
+            return; // Важливо завершити обробку тут
+        }
 
         if (AWAITING_FILE_FOR_CONVERSION.equals(appUser.getState())) {
             log.info("STATE IS AWAITING_FILE_FOR_CONVERSION (PhotoMessage) for user {}", appUser.getTelegramUserId());
@@ -410,6 +558,29 @@ public class MainServiceImpl implements MainService {
             sendAnswer("Очікувалося голосове повідомлення, але воно відсутнє.", chatId);
             return;
         }
+        if (ARCHIVING_FILES.equals(appUser.getState())) {
+            if (telegramVoice != null) {
+                String fileId = telegramVoice.getFileId();
+                // Генеруємо ім'я файлу для голосового повідомлення
+                // Telegram зазвичай надсилає голосові в контейнері OGG з кодеком OPUS.
+                String originalFileName = "voice_" + fileId + "_" + System.currentTimeMillis() + ".ogg";
+
+                ArchiveFileDetailDTO fileDetail = new ArchiveFileDetailDTO(fileId, originalFileName, "voice"); // Тип "voice" або "audio"
+
+                List<ArchiveFileDetailDTO> userArchiveFiles = archivingSessions.computeIfAbsent(appUser.getId(), k -> new ArrayList<>());
+                userArchiveFiles.add(fileDetail);
+                log.info("Додано голосове повідомлення '{}' (file_id: {}) до сесії архівування для користувача appUserId={}",
+                        originalFileName, fileId, appUser.getId());
+
+                sendArchiveOptions(chatId, "Голосове повідомлення '" + originalFileName + "' отримано.");
+            } else {
+                // Цей блок спрацює, якщо telegramVoice == null, хоча основна перевірка є нижче.
+                // Якщо ми потрапили сюди з ARCHIVING_FILES, але telegramVoice == null, що малоймовірно для цього методу.
+                log.warn("Очікувалося голосове повідомлення для архівування від користувача appUserId={}, але воно відсутнє.", appUser.getId());
+                sendAnswer("Помилка: очікувалося голосове повідомлення, але його не знайдено. Спробуйте надіслати ще раз.", chatId);
+            }
+            return; // Важливо завершити обробку тут
+        }
 
         if (AWAITING_FILE_FOR_CONVERSION.equals(appUser.getState())) {
             if (!appUser.isActive()) {
@@ -450,6 +621,40 @@ public class MainServiceImpl implements MainService {
         var chatId = update.getMessage().getChatId();
         Message message = update.getMessage();
         Video telegramVideo = message.getVideo();
+
+        // ОБРОБКА ВІДЕО ДЛЯ АРХІВУВАННЯ
+        if (ARCHIVING_FILES.equals(appUser.getState())) {
+            if (telegramVideo != null) {
+                String fileId = telegramVideo.getFileId();
+                String originalFileName = telegramVideo.getFileName();
+
+                // Якщо оригінальне ім'я файлу відсутнє, генеруємо його
+                if (originalFileName == null || originalFileName.isEmpty()) {
+                    String mimeType = telegramVideo.getMimeType() != null ? telegramVideo.getMimeType().toLowerCase() : "video/mp4";
+                    String ext = "mp4"; // За замовчуванням
+                    if (mimeType.contains("mp4")) ext = "mp4";
+                    else if (mimeType.contains("quicktime")) ext = "mov";
+                    else if (mimeType.contains("x-msvideo")) ext = "avi";
+                    else if (mimeType.contains("x-matroska")) ext = "mkv";
+                    else if (mimeType.contains("webm")) ext = "webm";
+                    originalFileName = "video_" + fileId + "_" + System.currentTimeMillis() + "." + ext;
+                    log.info("Згенеровано ім'я файлу для відео: {}", originalFileName);
+                }
+
+                ArchiveFileDetailDTO fileDetail = new ArchiveFileDetailDTO(fileId, originalFileName, "video");
+
+                List<ArchiveFileDetailDTO> userArchiveFiles = archivingSessions.computeIfAbsent(appUser.getId(), k -> new ArrayList<>());
+                userArchiveFiles.add(fileDetail);
+                log.info("Додано відео '{}' (file_id: {}) до сесії архівування для користувача appUserId={}",
+                        originalFileName, fileId, appUser.getId());
+
+                sendArchiveOptions(chatId, "Відео '" + originalFileName + "' отримано.");
+            } else {
+                log.warn("Очікувалося відео для архівування від користувача appUserId={}, але воно відсутнє.", appUser.getId());
+                sendAnswer("Помилка: очікувалося відео, але його не знайдено. Спробуйте надіслати ще раз.", chatId);
+            }
+            return; // Важливо завершити обробку тут
+        }
 
         if (telegramVideo == null) {
             log.warn("Message for user {} was routed to processVideoMessage, but Video object is null.", appUser.getTelegramUserId());
@@ -550,6 +755,42 @@ public class MainServiceImpl implements MainService {
         var chatId = update.getMessage().getChatId();
         Message message = update.getMessage();
         org.telegram.telegrambots.meta.api.objects.Audio telegramAudio = message.getAudio();
+
+        if (ARCHIVING_FILES.equals(appUser.getState())) {
+            if (telegramAudio != null) {
+                String fileId = telegramAudio.getFileId();
+                String originalFileName = telegramAudio.getFileName();
+
+                // Якщо оригінальне ім'я файлу відсутнє або некоректне, генеруємо його
+                if (originalFileName == null || originalFileName.isEmpty() || !originalFileName.contains(".")) {
+                    String ext = "dat"; // За замовчуванням, якщо MIME-тип невідомий
+                    if (telegramAudio.getMimeType() != null) {
+                        String mimeType = telegramAudio.getMimeType().toLowerCase();
+                        if (mimeType.contains("mpeg") || mimeType.contains("mp3")) ext = "mp3";
+                        else if (mimeType.contains("ogg")) ext = "ogg";
+                        else if (mimeType.contains("wav")) ext = "wav";
+                        else if (mimeType.contains("aac")) ext = "aac";
+                        else if (mimeType.contains("flac")) ext = "flac";
+                        else if (mimeType.contains("mp4") || mimeType.contains("m4a")) ext = "m4a"; // Часто mp4 контейнер для aac
+                    }
+                    originalFileName = "audio_" + fileId + "_" + System.currentTimeMillis() + "." + ext;
+                    log.info("Згенеровано ім'я файлу для аудіо: {}", originalFileName);
+                }
+
+                ArchiveFileDetailDTO fileDetail = new ArchiveFileDetailDTO(fileId, originalFileName, "audio");
+
+                List<ArchiveFileDetailDTO> userArchiveFiles = archivingSessions.computeIfAbsent(appUser.getId(), k -> new ArrayList<>());
+                userArchiveFiles.add(fileDetail);
+                log.info("Додано аудіофайл '{}' (file_id: {}) до сесії архівування для користувача appUserId={}",
+                        originalFileName, fileId, appUser.getId());
+
+                sendArchiveOptions(chatId, "Аудіофайл '" + originalFileName + "' отримано.");
+            } else {
+                log.warn("Очікувався аудіофайл для архівування від користувача appUserId={}, але він відсутній.", appUser.getId());
+                sendAnswer("Помилка: очікувався аудіофайл, але його не знайдено. Спробуйте надіслати ще раз.", chatId);
+            }
+            return; // Важливо завершити обробку тут
+        }
 
         if (telegramAudio == null) {
             sendAnswer("Очікувався аудіофайл, але він відсутній.", chatId);
@@ -698,18 +939,32 @@ public class MainServiceImpl implements MainService {
                 + "/registration - реєстрація\n"
 //                + "/resend_email - повторно надіслати лист активації\n"
                 + "/convert_file - увімкнути режим конвертації файлів\n"
+                + "/create_archive - увімкнути режим архіватора\n"
                 + "/generate_link - перейти в режим файлообмінника (вимкнути конвертацію)";
     }
 
     @Transactional
     protected String cancelProcess(AppUser appUser) {
         String previousStateInfo = "";
-        if (AWAITING_FILE_FOR_CONVERSION.equals(appUser.getState())) {
+        // Отримуємо поточний стан користувача
+        var currentState = appUser.getState(); // Використовуй appUser.getState()
+
+        if (AWAITING_FILE_FOR_CONVERSION.equals(currentState)) {
             previousStateInfo = "Режим конвертації скасовано. ";
+            // Можливо, тут також потрібно очищати pendingFileId, pendingOriginalFileName, pendingFileType
+            // appUser.setPendingFileId(null);
+            // appUser.setPendingOriginalFileName(null);
+            // appUser.setPendingFileType(null);
+        } else if (ARCHIVING_FILES.equals(currentState)) { // <--- ДОДАНО ЦЕЙ ELSE IF
+            clearArchiveSession(appUser.getId()); // Викликаємо очищення сесії архівування
+            previousStateInfo = "Сесію створення архіву скасовано. ";
+            log.info("User {} (appUserId={}) cancelled archiving session.", appUser.getTelegramUserId(), appUser.getId());
         }
-        appUser.setState(BASIC_STATE);
+        // Інші стани, які можуть потребувати очищення, можна додати тут
+
+        appUser.setState(BASIC_STATE); // Встановлюємо базовий стан
         appUserDAO.save(appUser);
-        log.info("User {} cancelled current operation. State set to BASIC_STATE", appUser.getTelegramUserId());
+        log.info("User {} (appUserId={}) cancelled current operation. State set to BASIC_STATE", appUser.getTelegramUserId(), appUser.getId());
         return previousStateInfo + "Ви повернулися в основний режим. Можете надсилати файли для обміну або використати /convert_file.";
     }
 
@@ -786,7 +1041,180 @@ public class MainServiceImpl implements MainService {
         log.info("Sent format selection keyboard to chat_id: {} for context: {}", chatId, fileTypeContext);
     }
     // ... інші методи класу ...
+    @Transactional
+    @Override
+    public void processCallbackQuery(Update update) {
+        saveRawData(update); // Зберігаємо RawData, як ти робиш в інших processXxx методах
 
+        if (update == null || !update.hasCallbackQuery() || update.getCallbackQuery().getData() == null) {
+            log.warn("Отримано порожній або невалідний CallbackQuery.");
+            return;
+        }
+
+        var callbackQuery = update.getCallbackQuery();
+        String callbackData = callbackQuery.getData();
+        Long chatId = callbackQuery.getMessage().getChatId(); // Отримуємо chatId з повідомлення, до якого прикріплена клавіатура
+
+        // Отримуємо користувача. findOrSaveAppUser має вміти обробляти update з CallbackQuery
+        var appUser = findOrSaveAppUser(update);
+        if (appUser == null) {
+            log.warn("Не вдалося знайти або створити користувача для CallbackQuery від chat_id: {}", chatId);
+            // Можливо, відповісти користувачеві про помилку, якщо це доречно
+            // producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка: користувача не знайдено");
+            return;
+        }
+
+        log.info("Отримано CallbackQuery від користувача appUserId={}, telegramUserId={}, дані: '{}'",
+                appUser.getId(), appUser.getTelegramUserId(), callbackData);
+
+        // Обробка callback-даних для архівування
+        if ("ARCHIVE_CREATE_NOW".equals(callbackData)) {
+            if (!ARCHIVING_FILES.equals(appUser.getState())) {
+                log.warn("Користувач appUserId={} натиснув 'ARCHIVE_CREATE_NOW', але не перебуває у стані ARCHIVING_FILES. Поточний стан: {}", appUser.getId(), appUser.getState());
+                sendAnswer("Ви не перебуваєте в режимі створення архіву. Щоб розпочати, надішліть команду /create_archive.", chatId);
+                // Відповідаємо на callback, щоб прибрати "годинник" з кнопки
+                producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка стану");
+                return;
+            }
+
+            List<ArchiveFileDetailDTO> filesToArchive = archivingSessions.get(appUser.getId());
+            if (filesToArchive == null || filesToArchive.isEmpty()) {
+                sendAnswer("Немає файлів для архівування. Спочатку надішліть файли.", chatId);
+                // Очищаємо сесію (хоча вона і так порожня) і повертаємо в базовий стан
+                clearArchiveSession(appUser.getId());
+                appUser.setState(BASIC_STATE);
+                appUserDAO.save(appUser);
+                producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Файли не знайдено");
+            } else {
+                // Тут буде логіка створення архіву (Крок 3)
+                log.info("Користувач appUserId={} натиснув 'Створити архів'. Кількість файлів: {}", appUser.getId(), filesToArchive.size());
+                sendAnswer("Розпочинаю створення архіву з " + filesToArchive.size() + " файлів... (реалізація на наступному етапі)", chatId);
+                producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Обробка..."); // Повідомлення для кнопки, що процес почався
+
+                try {
+                    // Крок 1: Створення архіву
+                    byte[] archiveBytes = fileService.createZipArchiveFromTelegramFiles(filesToArchive);
+
+                    if (archiveBytes == null || archiveBytes.length == 0) {
+                        log.error("Згенерований архів порожній або сталася помилка при його створенні для користувача appUserId={}", appUser.getId());
+                        sendAnswer("Не вдалося створити архів або він порожній. Спробуйте ще раз.", chatId);
+                        // Не очищаємо сесію, щоб користувач міг спробувати знову або скасувати
+                        return;
+                    }
+
+                    // Крок 2: Генерація імені файлу для архіву
+                    String archiveFileName = "archive_" + appUser.getTelegramUserId() + "_" + System.currentTimeMillis() + ".zip";
+
+                    // Крок 3: Збереження архіву як AppDocument
+                    AppDocument savedArchive = fileService.saveGeneratedArchive(appUser, archiveBytes, archiveFileName);
+
+                    if (savedArchive != null && savedArchive.getId() != null) { // Перевіряємо, що збереження в БД пройшло успішно
+                        log.info("Архів '{}' (id={}) успішно збережено в БД для користувача appUserId={}.",
+                                archiveFileName, savedArchive.getId(), appUser.getId());
+
+                        // Крок 4: Надсилання архіву користувачеві, передаючи байти та ім'я файлу
+                        DocumentToSendDTO archiveDto = DocumentToSendDTO.builder()
+                                .chatId(chatId.toString())
+                                .documentBytes(archiveBytes)    // <--- ВИПРАВЛЕНО: передаємо байти архіву
+                                .fileName(archiveFileName)      // <--- ВИПРАВЛЕНО: передаємо ім'я файлу
+                                .caption("Ваш архів '" + archiveFileName + "' готовий!")
+                                .build();
+                        producerService.producerSendDocumentDTO(archiveDto); // Метод producerService має обробляти DTO з байтами
+                        log.info("Запит на надсилання архіву '{}' (байти) для користувача appUserId={} відправлено до ProducerService.",
+                                archiveFileName, appUser.getId());
+                    }  else {
+                        log.error("Не вдалося зберегти згенерований архів '{}' в БД для користувача appUserId={}", archiveFileName, appUser.getId());
+                        sendAnswer("Не вдалося зберегти архів після створення. Будь ласка, повідомте адміністратора.", chatId);
+                        // Сесію тут можна очистити, оскільки архів створено, але не збережено - це проблема на боці сервера.
+                        // Або залишити, щоб користувач не втратив файли для наступної спроби, якщо проблема тимчасова.
+                        // Поки що не будемо очищати сесію, щоб уникнути втрати файлів.
+                        return;
+                    }
+
+                } catch (IOException e) {
+                    log.error("Помилка IOException при створенні архіву для користувача appUserId={}: {}", appUser.getId(), e.getMessage(), e);
+                    sendAnswer("Сталася помилка під час створення архіву. Спробуйте пізніше або зверніться до підтримки.", chatId);
+                    // Не очищаємо сесію, щоб користувач міг спробувати знову
+                    return;
+                } catch (IllegalArgumentException e) { // Для помилок валідації в saveGeneratedArchive
+                    log.error("Помилка IllegalArgumentException при збереженні архіву для appUserId={}: {}", appUser.getId(), e.getMessage(), e);
+                    sendAnswer("Помилка даних при спробі зберегти архів. Будь ласка, повідомте адміністратора.", chatId);
+                    return;
+                } catch (UploadFileException e) { // Для помилок збереження, які кидає saveGeneratedArchive
+                    log.error("Помилка UploadFileException при збереженні архіву для appUserId={}: {}", appUser.getId(), e.getMessage(), e);
+                    sendAnswer("Не вдалося зберегти архів через помилку: " + e.getMessage() + ". Спробуйте пізніше.", chatId);
+                    return;
+                } catch (Exception e) { // Загальна помилка
+                    log.error("Непередбачена помилка при створенні або збереженні архіву для appUserId={}: {}", appUser.getId(), e.getMessage(), e);
+                    sendAnswer("Сталася непередбачена помилка. Спробуйте пізніше або зверніться до підтримки.", chatId);
+                    // Не очищаємо сесію
+                    return;
+                } finally {
+                    // Очищення сесії та скидання стану відбудеться тільки якщо не було return у try/catch.
+                    // Якщо ми хочемо, щоб сесія завжди очищалася після натискання "Створити архів",
+                    // незалежно від успіху чи помилки, цей блок має бути тут.
+                    // Поточна логіка: якщо була помилка і return, сесія не очиститься, щоб дати змогу спробувати ще.
+                    // Якщо все пройшло до кінця try (тобто, архів поставлено в чергу на надсилання), то очищаємо.
+                    // Для того, щоб finally спрацював *після* return з try/catch, його потрібно було б винести
+                    // або мати іншу структуру.
+                    // Давайте змінимо: очистимо сесію і скинемо стан тільки якщо все пройшло до кінця `try` блоку.
+                    // Поточний finally виконається ПІСЛЯ return з try/catch, якщо вони там є. Це не те, що нам потрібно.
+
+                    // Краще так:
+                    // clearArchiveSession(appUser.getId());
+                    // appUser.setState(BASIC_STATE);
+                    // appUserDAO.save(appUser);
+                    // log.info("Сесію архівування для appUserId={} очищено, стан встановлено на BASIC_STATE після операції створення архіву.", appUser.getId());
+                }
+                // Очищення сесії та скидання стану ПІСЛЯ успішної постановки завдання на надсилання архіву.
+                // Якщо була помилка, ми вийшли раніше через return, і сесія не очистилася.
+                clearArchiveSession(appUser.getId());
+                appUser.setState(BASIC_STATE);
+                appUserDAO.save(appUser);
+                log.info("Сесію архівування для appUserId={} очищено, стан встановлено на BASIC_STATE після операції створення архіву.", appUser.getId());
+
+            }
+
+        } else if ("ARCHIVE_ADD_MORE".equals(callbackData)) {
+            if (!ARCHIVING_FILES.equals(appUser.getState())) {
+                log.warn("Користувач appUserId={} натиснув 'ARCHIVE_ADD_MORE', але не перебуває у стані ARCHIVING_FILES. Поточний стан: {}", appUser.getId(), appUser.getState());
+                sendAnswer("Ви не перебуваєте в режимі створення архіву. Щоб розпочати, надішліть команду /create_archive.", chatId);
+                producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Помилка стану");
+                return;
+            }
+
+            sendAnswer("Очікую наступний файл...", chatId);
+            // Відповідаємо на callback, щоб прибрати "годинник"
+            producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Надішліть ще файл");
+
+        } else if ("ARCHIVE_CANCEL_SESSION".equals(callbackData)) {
+        if (!ARCHIVING_FILES.equals(appUser.getState())) {
+            log.warn("Користувач appUserId={} натиснув 'ARCHIVE_CANCEL_SESSION', але не перебуває у стані ARCHIVING_FILES. Поточний стан: {}", appUser.getId(), appUser.getState());
+            // Можна нічого не відповідати або відповісти, що він не в режимі архівування
+            producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Ви не в режимі архівування");
+            return;
+        }
+
+        clearArchiveSession(appUser.getId()); // Очищаємо сесію
+        appUser.setState(BASIC_STATE);      // Повертаємо в базовий стан
+        appUserDAO.save(appUser);
+        log.info("Користувач appUserId={} скасував сесію архівування через кнопку.", appUser.getId());
+
+        sendAnswer("Створення архіву скасовано. Ви повернулися в основний режим.", chatId);
+        producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Скасовано"); // Відповідь на callback
+        // ВСТАВ ДО ЦЬОГО МІСЦЯ
+
+    } else if (callbackData.startsWith("format_select_") || "cancel_format_selection".equals(callbackData)) {
+            // Якщо це callback для вибору формату, передаємо його існуючому обробнику
+            log.debug("Перенаправлення CallbackQuery '{}' до processFormatSelectionCallback для користувача appUserId={}", callbackData, appUser.getId());
+            processFormatSelectionCallback(update); // Викликаємо твій існуючий метод
+
+        } else {
+            log.warn("Отримано невідомий CallbackQuery: '{}' від користувача appUserId={}", callbackData, appUser.getId());
+            // Можна відповісти на callback, щоб кнопка перестала "думати"
+            producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Невідома команда");
+        }
+    }
     @Transactional
     public void processFormatSelectionCallback(Update update) {
         // Перевіряємо, чи є CallbackQuery і чи є дані в ньому

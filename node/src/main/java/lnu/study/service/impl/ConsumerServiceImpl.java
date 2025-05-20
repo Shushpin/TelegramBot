@@ -62,11 +62,21 @@ public class ConsumerServiceImpl implements ConsumerService {
     public void consumeCallbackQueryUpdate(@Payload Update update) {
         log.debug("NODE: Callback Query Update is received from queue {}", CALLBACK_QUERY_UPDATE);
         try {
-            mainService.processFormatSelectionCallback(update);
+            // Змінюємо виклик на новий загальний метод обробки callback-ів
+            mainService.processCallbackQuery(update); // <--- ЗМІНЕНО ТУТ
         } catch (Exception e) {
             log.error("Error processing callback query update: {}", e.getMessage(), e);
             // Тут можна додати логіку для надсилання повідомлення про помилку користувачеві,
             // або просто логувати, залежно від політики обробки помилок.
+            // Наприклад, можна спробувати відповісти на сам callbackQuery з повідомленням про помилку,
+            // щоб користувач не бачив "вічну загрузку" кнопки.
+            // if (update != null && update.hasCallbackQuery() && update.getCallbackQuery().getId() != null) {
+            // try {
+            // producerService.producerAnswerCallbackQuery(update.getCallbackQuery().getId(), "Помилка обробки");
+            // } catch (Exception answerEx) {
+            // log.error("Failed to send error answer to callback query: {}", answerEx.getMessage());
+            // }
+            // }
         }
     }
     @RabbitListener(queues = AUDIO_MESSAGE_UPDATE)
