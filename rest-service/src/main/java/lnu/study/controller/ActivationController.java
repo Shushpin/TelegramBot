@@ -17,7 +17,7 @@ public class ActivationController {
     public ResponseEntity<?> activation(@RequestParam("id") String id) {
         boolean isActivated = userActivationService.activation(id);
         if (isActivated) {
-            return ResponseEntity.ok().body("Реєстрація пройшла успішно!");
+            return ResponseEntity.ok().body("Реєстрація пройшла успішно! " + "Ви можете повернутися в чат до бота для роботи з файлами! ");
         }
         return ResponseEntity.internalServerError().body("Помилка активації. Можливо, посилання недійсне або застаріле.");
     }

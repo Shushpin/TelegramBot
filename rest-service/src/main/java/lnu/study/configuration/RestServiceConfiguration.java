@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class RestServiceConfiguration {
-    @Value("${salt]")
+    @Value("${salt}")
     private String salt;
 
     @Bean

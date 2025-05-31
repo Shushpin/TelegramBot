@@ -157,6 +157,7 @@ public class MainServiceImpl implements MainService {
                         "- Голосове або аудіо файл\n" +
                         "- DOCX (в PDF чи ODT,конвертація може зайняти до 5 хвилин) \n\n" +
                         "Для виходу з режиму конвертації: /cancel\n" +
+                        "Для переходу в режим архіватора: /create_archive\n" +
                         "Для переходу в режим файлообмінника: /generate_link";
             }
         } else if (AWAITING_FILE_FOR_CONVERSION.equals(userState)) {
@@ -201,8 +202,8 @@ public class MainServiceImpl implements MainService {
         appUser.setState(BASIC_STATE);
         appUserDAO.save(appUser);
         log.info("User {} switched to BASIC_STATE (generate link mode).", appUser.getTelegramUserId());
-        return "Режим конвертації вимкнено. Тепер ви можете надсилати файли для генерації посилань.\n" +
-                "Для повторного входу в режим конвертації використайте /convert_file.";
+        return "Останній режим вимкнено. Тепер ви можете надсилати файли для генерації посилань.\n\n" +
+                "Для перегляду доступних комад використайте /help.";
     }
 
     // Новий допоміжний метод для повідомлення після конвертації
@@ -210,7 +211,8 @@ public class MainServiceImpl implements MainService {
         String messageText = "Файл успішно сконвертовано!\n" +
                 "Надішліть наступний файл для конвертації, \n" +
                 "або /cancel для виходу з режиму, \n" +
-                "або /generate_link для переходу в режим файлообмінника.";
+                "або /generate_link для переходу в режим файлообмінника, \n" +
+                "або /create_archive для переходу в режим архіватора.";
         sendAnswer(messageText, chatId);
     }
 
@@ -246,7 +248,7 @@ public class MainServiceImpl implements MainService {
                         originalFileName, fileId, appUser.getId());
 
                 // Надсилаємо повідомлення з кнопками
-                sendArchiveOptions(chatId, "Документ '" + originalFileName + "' отримано.");
+                sendArchiveOptions(chatId, "Файл '" + originalFileName + "' отримано.");
             } else {
                 // Це малоймовірно, якщо Telegram правильно маршрутизував як DocMessage, але для повноти
                 log.warn("Очікувався документ для архівування від користувача appUserId={}, але він відсутній.", appUser.getId());
@@ -389,7 +391,9 @@ public class MainServiceImpl implements MainService {
                 AppDocument doc = fileService.processDoc(message);
                 if (doc != null) {
                     String link = fileService.generateLink(doc.getId(), LinkType.GET_DOC);
-                    sendAnswer("Документ '" + doc.getDocName() + "' завантажено! Посилання: " + link, chatId);
+                    String outputMessage = "Документ '" + doc.getDocName() + "'завантажено. Посилання: " + link
+                            + "\n\nДля виходу з режиму генерації посилань натисніть /cancel або відправте наступний файл.";
+                    sendAnswer(outputMessage, chatId);
                 } else { sendAnswer("Не вдалося обробити документ.", chatId); }
             } catch (Exception e) { sendAnswer("Помилка при збереженні документа.", chatId); }
         }
@@ -536,7 +540,9 @@ public class MainServiceImpl implements MainService {
                 AppPhoto photo = fileService.processPhoto(message);
                 if (photo != null) {
                     String link = fileService.generateLink(photo.getId(), LinkType.GET_PHOTO);
-                    sendAnswer("Фото завантажено! Посилання: " + link, chatId);
+                    String outputMessage = "Фото завантажено! Посилання: " + link
+                            + "\n\nДля виходу з режиму генерації посилань натисніть /cancel або відправте наступне фото.";
+                    sendAnswer(outputMessage, chatId);
                 } else { sendAnswer("Не вдалося обробити фото.", chatId); }
             } catch (Exception e) { sendAnswer("Помилка при збереженні фото.", chatId); }
         }
@@ -965,7 +971,7 @@ public class MainServiceImpl implements MainService {
         appUser.setState(BASIC_STATE); // Встановлюємо базовий стан
         appUserDAO.save(appUser);
         log.info("User {} (appUserId={}) cancelled current operation. State set to BASIC_STATE", appUser.getTelegramUserId(), appUser.getId());
-        return previousStateInfo + "Ви повернулися в основний режим. Можете надсилати файли для обміну або використати /convert_file.";
+        return previousStateInfo + "Ви повернулися в основний режим. Можете надсилати файли для обміну або використати команди: /convert_file, /create_archive ";
     }
 
     @Transactional
@@ -1117,7 +1123,7 @@ public class MainServiceImpl implements MainService {
                                 .chatId(chatId.toString())
                                 .documentBytes(archiveBytes)    // <--- ВИПРАВЛЕНО: передаємо байти архіву
                                 .fileName(archiveFileName)      // <--- ВИПРАВЛЕНО: передаємо ім'я файлу
-                                .caption("Ваш архів '" + archiveFileName + "' готовий!")
+                                .caption("Ваш архів '" + archiveFileName + "' готовий!\n\nВи в основному режимі, надішліть файл для генерації посилань або виконайте команду /help для перегляду команд!")
                                 .build();
                         producerService.producerSendDocumentDTO(archiveDto); // Метод producerService має обробляти DTO з байтами
                         log.info("Запит на надсилання архіву '{}' (байти) для користувача appUserId={} відправлено до ProducerService.",
@@ -1200,7 +1206,7 @@ public class MainServiceImpl implements MainService {
         appUserDAO.save(appUser);
         log.info("Користувач appUserId={} скасував сесію архівування через кнопку.", appUser.getId());
 
-        sendAnswer("Створення архіву скасовано. Ви повернулися в основний режим.", chatId);
+        sendAnswer("Створення архіву скасовано. Ви повернулися в основний режим.\n\nНадішліть файл для генерації посилання, або виконайте команду /help.", chatId);
         producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Скасовано"); // Відповідь на callback
         // ВСТАВ ДО ЦЬОГО МІСЦЯ
 
