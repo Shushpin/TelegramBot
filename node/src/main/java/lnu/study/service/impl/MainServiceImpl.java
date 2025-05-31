@@ -649,7 +649,41 @@ public class MainServiceImpl implements MainService {
         var chatId = update.getMessage().getChatId();
         Message message = update.getMessage();
         Video telegramVideo = message.getVideo();
+        if ((BASIC_STATE.equals(appUser.getState()) || EMAIL_CONFIRMED_STATE.equals(appUser.getState())) && appUser.isActive()) {
+            String permissionError = checkPermissionError(appUser);
+            if (permissionError != null) {
+                sendAnswer(permissionError, chatId);
+                return;
+            }
+            try {
+                // fileService.processVideo тепер поверне null, якщо відео завелике
+                AppVideo videoEntity = fileService.processVideo(message);
 
+                if (videoEntity != null) {
+                    String link = fileService.generateLink(videoEntity.getId(), LinkType.GET_VIDEO);
+                    String originalFileNameDisplay = videoEntity.getFileName() != null && !videoEntity.getFileName().isBlank()
+                            ? videoEntity.getFileName()
+                            : "Відеофайл";
+                    String outputMessage = "🎬 Відеофайл '" + originalFileNameDisplay + "' завантажено!\nПосилання: " + link
+                            + "\n\nДля виходу з режиму генерації посилань натисніть /cancel або відправте наступний файл.";
+                    sendAnswer(outputMessage, chatId);
+                } else {
+                    // Перевіряємо розмір файлу, оскільки videoEntity може бути null через ліміт
+                    if (telegramVideo.getFileSize() > 20 * 1024 * 1024) { // 20MB
+                        sendAnswer("На жаль, відеофайл занадто великий (більше 20MB) для створення прямого посилання. Максимальний розмір: 20MB.", chatId);
+                    } else {
+                        sendAnswer("Не вдалося обробити відеофайл для генерації посилання.", chatId);
+                    }
+                }
+            } catch (UploadFileException e) {
+                log.error("Помилка UploadFileException при обробці відео для посилання: {}", e.getMessage(), e);
+                sendAnswer("Помилка при обробці відеофайлу: " + e.getMessage(), chatId);
+            } catch (Exception e) {
+                log.error("Загальна помилка при обробці відео для посилання: {}", e.getMessage(), e);
+                sendAnswer("Помилка при збереженні відеофайлу.", chatId);
+            }
+            return;
+        }
         // ОБРОБКА ВІДЕО ДЛЯ АРХІВУВАННЯ
         if (ARCHIVING_FILES.equals(appUser.getState())) {
             if (telegramVideo != null) {
@@ -1205,24 +1239,7 @@ public class MainServiceImpl implements MainService {
                     // Не очищаємо сесію
                     return;
                 } finally {
-                    // Очищення сесії та скидання стану відбудеться тільки якщо не було return у try/catch.
-                    // Якщо ми хочемо, щоб сесія завжди очищалася після натискання "Створити архів",
-                    // незалежно від успіху чи помилки, цей блок має бути тут.
-                    // Поточна логіка: якщо була помилка і return, сесія не очиститься, щоб дати змогу спробувати ще.
-                    // Якщо все пройшло до кінця try (тобто, архів поставлено в чергу на надсилання), то очищаємо.
-                    // Для того, щоб finally спрацював *після* return з try/catch, його потрібно було б винести
-                    // або мати іншу структуру.
-                    // Давайте змінимо: очистимо сесію і скинемо стан тільки якщо все пройшло до кінця `try` блоку.
-                    // Поточний finally виконається ПІСЛЯ return з try/catch, якщо вони там є. Це не те, що нам потрібно.
-
-                    // Краще так:
-                    // clearArchiveSession(appUser.getId());
-                    // appUser.setState(BASIC_STATE);
-                    // appUserDAO.save(appUser);
-                    // log.info("Сесію архівування для appUserId={} очищено, стан встановлено на BASIC_STATE після операції створення архіву.", appUser.getId());
                 }
-                // Очищення сесії та скидання стану ПІСЛЯ успішної постановки завдання на надсилання архіву.
-                // Якщо була помилка, ми вийшли раніше через return, і сесія не очистилася.
                 clearArchiveSession(appUser.getId());
                 appUser.setState(BASIC_STATE);
                 appUserDAO.save(appUser);

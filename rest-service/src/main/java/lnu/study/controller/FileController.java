@@ -121,4 +121,53 @@ public class FileController {
             }
         }
     }
+    @RequestMapping(method = RequestMethod.GET, value = "get-video")
+    public void getVideo(@RequestParam("id") String id, HttpServletResponse response) {
+        var video = fileService.getVideo(id);
+        if (video == null) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return;
+        }
+
+        String contentType = video.getMimeType() != null && !video.getMimeType().isBlank()
+                ? video.getMimeType()
+                : "video/mp4"; // За замовчуванням для відео можна mp4
+        try {
+            response.setContentType(MediaType.parseMediaType(contentType).toString());
+        } catch (Exception e) {
+            log.warn("Не вдалося розпарсити MIME-тип '{}' для відео, встановлюю video/mp4", contentType, e);
+            response.setContentType("video/mp4");
+        }
+
+        String fileName = video.getFileName() != null && !video.getFileName().isBlank()
+                ? video.getFileName()
+                : "video_file.mp4";
+        String encodedFileName = UriUtils.encode(fileName, StandardCharsets.UTF_8);
+        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodedFileName);
+
+        // Для відео можна також додати заголовок Accept-Ranges для підтримки часткового завантаження (пауза, перемотка)
+        // response.setHeader("Accept-Ranges", "bytes");
+        // Обробка Range запитів - це окрема, складніша задача для потокового відео.
+        // Для простого завантаження це не обов'язково.
+
+        response.setStatus(HttpServletResponse.SC_OK);
+
+        var binaryContent = video.getBinaryContent();
+        if (binaryContent == null || binaryContent.getFileAsArrayOfBytes() == null) {
+            log.error("BinaryContent або його масив байтів є null для відео id: {}", id);
+            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            return;
+        }
+
+        try {
+            var out = response.getOutputStream();
+            out.write(binaryContent.getFileAsArrayOfBytes());
+            out.close();
+        } catch (IOException e) {
+            log.error("Помилка запису відео у вихідний потік для id {}: {}", id, e.getMessage(), e);
+            if (!response.isCommitted()) {
+                response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            }
+        }
+    }
 }

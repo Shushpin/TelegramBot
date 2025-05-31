@@ -20,6 +20,8 @@ import lnu.study.dao.BinaryContentDAO;
 import lnu.study.exceptions.UploadFileException;
 import lnu.study.service.FileService;
 import lnu.study.dto.ArchiveFileDetailDTO; // З common-utils
+import lnu.study.dao.AppVideoDAO;
+import lnu.study.entity.AppVideo;
 
 
 import java.io.ByteArrayOutputStream;
@@ -44,9 +46,12 @@ public class FileServiceImpl implements FileService {
     @Value("${link.address}")
     private String linkAddress;
 
+    private static final long MAX_VIDEO_SIZE_FOR_LINK_BYTES = 50 * 1024 * 1024;
+
     private final AppDocumentDAO appDocumentDAO;
     private final AppPhotoDAO appPhotoDAO;
     private final BinaryContentDAO binaryContentDAO;
+    private final AppVideoDAO appVideoDAO;
     private final CryptoTool cryptoTool;
     private final AppAudioDAO appAudioDAO; // <--- ОГОЛОШЕННЯ ПОЛЯ
 
@@ -54,10 +59,12 @@ public class FileServiceImpl implements FileService {
     public FileServiceImpl(AppDocumentDAO appDocumentDAO,
                            AppPhotoDAO appPhotoDAO,
                            AppAudioDAO appAudioDAO,
+                           AppVideoDAO appVideoDAO,
                            BinaryContentDAO binaryContentDAO, CryptoTool cryptoTool) {
         this.appDocumentDAO = appDocumentDAO;
         this.appPhotoDAO = appPhotoDAO;
         this.appAudioDAO = appAudioDAO;
+        this.appVideoDAO = appVideoDAO;
         this.binaryContentDAO = binaryContentDAO;
         this.cryptoTool = cryptoTool;
     }
@@ -154,6 +161,64 @@ public class FileServiceImpl implements FileService {
             return appAudioDAO.save(transientAppAudio);
         } else {
             log.error("Не вдалося отримати шлях до файлу для аудіо/голосового fileId {}. Відповідь: {}", fileIdInput, response);
+            throw new UploadFileException("Погана відповідь від сервісу Telegram: " + response);
+        }
+    }
+
+    @Override
+    @Transactional
+    public AppVideo processVideo(Message telegramMessage) {
+        org.telegram.telegrambots.meta.api.objects.Video telegramVideo = telegramMessage.getVideo();
+
+        if (telegramVideo == null) {
+            log.warn("Повідомлення не містить відео: {}", telegramMessage.getMessageId());
+            return null;
+        }
+
+        // Перевірка розміру файлу
+        if (telegramVideo.getFileSize() > MAX_VIDEO_SIZE_FOR_LINK_BYTES) {
+            log.info("Відеофайл (file_id: {}) занадто великий ({} байт) для генерації посилання. Ліміт: {} байт.",
+                    telegramVideo.getFileId(), telegramVideo.getFileSize(), MAX_VIDEO_SIZE_FOR_LINK_BYTES);
+            // Повертаємо null, щоб MainServiceImpl міг повідомити користувача
+            // Або можна кидати кастомний виняток, наприклад, FileSizeLimitExceededException
+            return null;
+        }
+
+        String fileIdInput = telegramVideo.getFileId();
+        String mimeTypeInput = telegramVideo.getMimeType();
+        Long fileSizeInput = telegramVideo.getFileSize();
+        Integer durationInput = telegramVideo.getDuration();
+        Integer widthInput = telegramVideo.getWidth();
+        Integer heightInput = telegramVideo.getHeight();
+        String fileNameInput = telegramVideo.getFileName();
+
+        if (fileNameInput == null || fileNameInput.isBlank()) {
+            String extension = ".mp4"; // Базове розширення
+            if (mimeTypeInput != null) {
+                if (mimeTypeInput.contains("mp4")) extension = ".mp4";
+                else if (mimeTypeInput.contains("quicktime")) extension = ".mov";
+                else if (mimeTypeInput.contains("x-matroska")) extension = ".mkv";
+                // Додайте інші MIME-типи за потреби
+            }
+            fileNameInput = "video_" + fileIdInput + extension;
+        }
+
+        ResponseEntity<String> response = getFilePathResponseEntity(fileIdInput);
+        if (response.getStatusCode() == HttpStatus.OK) {
+            BinaryContent persistentBinaryContent = getPersistentBinaryContent(response);
+            AppVideo transientAppVideo = AppVideo.builder()
+                    .telegramFileId(fileIdInput)
+                    .binaryContent(persistentBinaryContent)
+                    .mimeType(mimeTypeInput)
+                    .fileSize(fileSizeInput)
+                    .duration(durationInput)
+                    .width(widthInput)
+                    .height(heightInput)
+                    .fileName(fileNameInput)
+                    .build();
+            return appVideoDAO.save(transientAppVideo);
+        } else {
+            log.error("Не вдалося отримати шлях до файлу для відео fileId {}. Відповідь: {}", fileIdInput, response);
             throw new UploadFileException("Погана відповідь від сервісу Telegram: " + response);
         }
     }
