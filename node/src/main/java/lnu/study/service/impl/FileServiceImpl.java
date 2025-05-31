@@ -1,6 +1,7 @@
 package lnu.study.service.impl;
 
-import lnu.study.entity.AppUser;
+import lnu.study.dao.AppAudioDAO;
+import lnu.study.entity.*;
 import lnu.study.service.enums.LinkType;
 import lnu.study.utils.CryptoTool;
 import lombok.extern.log4j.Log4j2;
@@ -16,9 +17,6 @@ import org.telegram.telegrambots.meta.api.objects.PhotoSize;
 import lnu.study.dao.AppDocumentDAO;
 import lnu.study.dao.AppPhotoDAO;
 import lnu.study.dao.BinaryContentDAO;
-import lnu.study.entity.AppDocument;
-import lnu.study.entity.AppPhoto;
-import lnu.study.entity.BinaryContent;
 import lnu.study.exceptions.UploadFileException;
 import lnu.study.service.FileService;
 import lnu.study.dto.ArchiveFileDetailDTO; // З common-utils
@@ -50,12 +48,16 @@ public class FileServiceImpl implements FileService {
     private final AppPhotoDAO appPhotoDAO;
     private final BinaryContentDAO binaryContentDAO;
     private final CryptoTool cryptoTool;
+    private final AppAudioDAO appAudioDAO; // <--- ОГОЛОШЕННЯ ПОЛЯ
+
 
     public FileServiceImpl(AppDocumentDAO appDocumentDAO,
                            AppPhotoDAO appPhotoDAO,
+                           AppAudioDAO appAudioDAO,
                            BinaryContentDAO binaryContentDAO, CryptoTool cryptoTool) {
         this.appDocumentDAO = appDocumentDAO;
         this.appPhotoDAO = appPhotoDAO;
+        this.appAudioDAO = appAudioDAO;
         this.binaryContentDAO = binaryContentDAO;
         this.cryptoTool = cryptoTool;
     }
@@ -100,6 +102,59 @@ public class FileServiceImpl implements FileService {
         } else {
             log.error("Failed to get file path for photo fileId {}. Response: {}", fileId, response);
             throw new UploadFileException("Bad response from telegram service: " + response);
+        }
+    }
+
+    @Override
+    @Transactional
+    public AppAudio processAudio(Message telegramMessage) {
+        org.telegram.telegrambots.meta.api.objects.Audio telegramAudio = telegramMessage.getAudio();
+        org.telegram.telegrambots.meta.api.objects.Voice telegramVoice = telegramMessage.getVoice();
+
+        String fileIdInput;
+        String mimeTypeInput;
+        Long fileSizeInput;
+        Integer durationInput;
+        String fileNameInput;
+
+        if (telegramAudio != null) {
+            fileIdInput = telegramAudio.getFileId();
+            mimeTypeInput = telegramAudio.getMimeType();
+            fileSizeInput = telegramAudio.getFileSize();
+            durationInput = telegramAudio.getDuration();
+            fileNameInput = telegramAudio.getFileName();
+            // Якщо ім'я файлу відсутнє, генеруємо його
+            if (fileNameInput == null || fileNameInput.isBlank()) {
+                String extension = mimeTypeInput != null && mimeTypeInput.contains("mpeg") ? ".mp3" : ".oga"; // Приклад
+                fileNameInput = "audio_" + fileIdInput + extension;
+            }
+        } else if (telegramVoice != null) {
+            fileIdInput = telegramVoice.getFileId();
+            mimeTypeInput = telegramVoice.getMimeType(); // Зазвичай "audio/ogg"
+            fileSizeInput = telegramVoice.getFileSize();
+            durationInput = telegramVoice.getDuration();
+            fileNameInput = "voice_" + fileIdInput + ".ogg"; // Для голосових генеруємо ім'я
+        } else {
+            log.warn("Повідомлення не містить аудіо або голосового повідомлення: " + telegramMessage.getMessageId());
+            return null;
+        }
+
+        // Логіка завантаження файлу та збереження BinaryContent (схожа на processDoc/processPhoto)
+        ResponseEntity<String> response = getFilePathResponseEntity(fileIdInput);
+        if (response.getStatusCode() == HttpStatus.OK) {
+            BinaryContent persistentBinaryContent = getPersistentBinaryContent(response);
+            AppAudio transientAppAudio = AppAudio.builder()
+                    .telegramFileId(fileIdInput)
+                    .binaryContent(persistentBinaryContent)
+                    .mimeType(mimeTypeInput)
+                    .fileSize(fileSizeInput)
+                    .duration(durationInput)
+                    .fileName(fileNameInput)
+                    .build();
+            return appAudioDAO.save(transientAppAudio);
+        } else {
+            log.error("Не вдалося отримати шлях до файлу для аудіо/голосового fileId {}. Відповідь: {}", fileIdInput, response);
+            throw new UploadFileException("Погана відповідь від сервісу Telegram: " + response);
         }
     }
 
@@ -204,8 +259,8 @@ public class FileServiceImpl implements FileService {
 
     }
     @Override
-    public String generateLink(Long docId, LinkType linkType) {
-        var hash = cryptoTool.hashOf(docId);
+    public String generateLink(Long fileId, LinkType linkType) {
+        var hash = cryptoTool.hashOf(fileId);
         return "http://" + linkAddress + "/" +linkType+ "?id=" + hash;
     }
     @Override

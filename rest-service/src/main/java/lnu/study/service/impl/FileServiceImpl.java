@@ -2,19 +2,14 @@ package lnu.study.service.impl;
 
 import lnu.study.dao.AppDocumentDAO;
 import lnu.study.dao.AppPhotoDAO;
-import lnu.study.dao.BinaryContentDAO;
 import lnu.study.entity.AppDocument;
 import lnu.study.entity.AppPhoto;
-import lnu.study.entity.BinaryContent;
 import lnu.study.service.FileService;
 import lnu.study.utils.CryptoTool;
 import lombok.extern.log4j.Log4j2;
-import org.apache.commons.io.FileUtils;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.stereotype.Service;
-
-import java.io.File;
-import java.io.IOException;
+import lnu.study.dao.AppAudioDAO;
+import lnu.study.entity.AppAudio;
 
 
 @Service
@@ -23,11 +18,13 @@ public class FileServiceImpl implements FileService {
 
     private final AppDocumentDAO appDocumentDAO;
     private final AppPhotoDAO appPhotoDAO;
+    private final AppAudioDAO appAudioDAO;
     private final CryptoTool cryptoTool;
 
-    public FileServiceImpl(AppDocumentDAO appDocumentDAO, AppPhotoDAO appPhotoDAO, CryptoTool cryptoTool) {
+    public FileServiceImpl(AppDocumentDAO appDocumentDAO,AppAudioDAO appAudioDAO, AppPhotoDAO appPhotoDAO, CryptoTool cryptoTool) {
         this.appDocumentDAO = appDocumentDAO;
         this.appPhotoDAO = appPhotoDAO;
+        this.appAudioDAO = appAudioDAO;
         this.cryptoTool = cryptoTool;
     }
 
@@ -47,6 +44,14 @@ public class FileServiceImpl implements FileService {
             return null;
         }
         return appPhotoDAO.findById(id).orElse(null);
+    }
+    @Override
+    public AppAudio getAudio(String hash) {
+        var id = cryptoTool.idOf(hash);
+        if (id == null) {
+            return null;
+        }
+        return appAudioDAO.findById(id).orElse(null);
     }
 
 }

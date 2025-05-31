@@ -6,10 +6,7 @@ import lnu.study.dto.AudioToSendDTO;
 import lnu.study.dto.DocumentToSendDTO;
 import lnu.study.dto.PhotoToSendDTO;
 import lnu.study.dto.VideoToSendDTO;
-import lnu.study.entity.AppDocument;
-import lnu.study.entity.AppPhoto;
-import lnu.study.entity.AppUser;
-import lnu.study.entity.RawData;
+import lnu.study.entity.*;
 import lnu.study.exceptions.UploadFileException;
 import lnu.study.service.*;
 import lnu.study.service.enums.LinkType;
@@ -564,6 +561,31 @@ public class MainServiceImpl implements MainService {
             sendAnswer("Очікувалося голосове повідомлення, але воно відсутнє.", chatId);
             return;
         }
+        if ((BASIC_STATE.equals(appUser.getState()) || EMAIL_CONFIRMED_STATE.equals(appUser.getState())) && appUser.isActive()) {
+            String permissionError = checkPermissionError(appUser); // Додаткова перевірка, хоча isActive вже перевірили
+            if (permissionError != null) {
+                sendAnswer(permissionError, chatId);
+                return;
+            }
+            try {
+                AppAudio audioEntity = fileService.processAudio(message); // Використовуємо новий метод
+                if (audioEntity != null) {
+                    String link = fileService.generateLink(audioEntity.getId(), LinkType.GET_AUDIO);
+                    String outputMessage = "🎤 Голосове повідомлення '" + audioEntity.getFileName() + "' завантажено!\nПосилання: " + link
+                            + "\n\nДля виходу з режиму генерації посилань натисніть /cancel або відправте наступний файл.";
+                    sendAnswer(outputMessage, chatId);
+                } else {
+                    sendAnswer("Не вдалося обробити голосове повідомлення для генерації посилання.", chatId);
+                }
+            } catch (UploadFileException e) {
+                log.error("Помилка UploadFileException при обробці голосового для посилання: {}", e.getMessage(), e);
+                sendAnswer("Помилка при обробці голосового повідомлення: " + e.getMessage(), chatId);
+            } catch (Exception e) {
+                log.error("Загальна помилка при обробці голосового для посилання: {}", e.getMessage(), e);
+                sendAnswer("Помилка при збереженні голосового повідомлення.", chatId);
+            }
+            return; // Завершуємо обробку, якщо згенерували посилання
+        }
         if (ARCHIVING_FILES.equals(appUser.getState())) {
             if (telegramVoice != null) {
                 String fileId = telegramVoice.getFileId();
@@ -761,7 +783,34 @@ public class MainServiceImpl implements MainService {
         var chatId = update.getMessage().getChatId();
         Message message = update.getMessage();
         org.telegram.telegrambots.meta.api.objects.Audio telegramAudio = message.getAudio();
-
+        if ((BASIC_STATE.equals(appUser.getState()) || EMAIL_CONFIRMED_STATE.equals(appUser.getState())) && appUser.isActive()) {
+            String permissionError = checkPermissionError(appUser);
+            if (permissionError != null) {
+                sendAnswer(permissionError, chatId);
+                return;
+            }
+            try {
+                AppAudio audioEntity = fileService.processAudio(message); // Використовуємо той самий метод processAudio
+                if (audioEntity != null) {
+                    String link = fileService.generateLink(audioEntity.getId(), LinkType.GET_AUDIO);
+                    String originalFileNameDisplay = audioEntity.getFileName() != null && !audioEntity.getFileName().isBlank()
+                            ? audioEntity.getFileName()
+                            : "Аудіофайл";
+                    String outputMessage = "🎧 Аудіофайл '" + originalFileNameDisplay + "' завантажено!\nПосилання: " + link
+                            + "\n\nДля виходу з режиму генерації посилань натисніть /cancel або відправте наступний файл.";
+                    sendAnswer(outputMessage, chatId);
+                } else {
+                    sendAnswer("Не вдалося обробити аудіофайл для генерації посилання.", chatId);
+                }
+            } catch (UploadFileException e) {
+                log.error("Помилка UploadFileException при обробці аудіофайлу для посилання: {}", e.getMessage(), e);
+                sendAnswer("Помилка при обробці аудіофайлу: " + e.getMessage(), chatId);
+            } catch (Exception e) {
+                log.error("Загальна помилка при обробці аудіофайлу для посилання: {}", e.getMessage(), e);
+                sendAnswer("Помилка при збереженні аудіофайлу.", chatId);
+            }
+            return; // Завершуємо обробку, якщо згенерували посилання
+        }
         if (ARCHIVING_FILES.equals(appUser.getState())) {
             if (telegramAudio != null) {
                 String fileId = telegramAudio.getFileId();
