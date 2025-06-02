@@ -1,9 +1,0 @@
-server.port=8084
-
-# Налаштування підключення до бази даних PostgreSQL
-spring.datasource.url=jdbc:postgresql://localhost:5432/{YOUR_NAME}
-spring.datasource.username={NAME}
-spring.datasource.password={PASSWORD}
-
-# Налаштування JPA/Hibernate
-spring.jpa.generate-ddl=true
