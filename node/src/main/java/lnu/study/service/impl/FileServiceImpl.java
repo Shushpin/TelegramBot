@@ -273,24 +273,45 @@ public class FileServiceImpl implements FileService {
                 .build();
     }
 
-    private ResponseEntity<String> getFilePathResponseEntity(String fileId) {
+    private ResponseEntity<String> getFilePathResponseEntity(String fileId) { // fileId - це правильний ID фотографії
         RestTemplate restTemplate = new RestTemplate();
         HttpHeaders headers = new HttpHeaders();
         HttpEntity<String> request = new HttpEntity<>(headers);
 
+        log.error("!!!!!!!!!! [NODE FileServiceImpl] ENTERING getFilePathResponseEntity with fileId: [{}] !!!!!!!!!!", fileId);
+        log.info("FileServiceImpl (node) - getFilePathResponseEntity - Attempting to get file path.");
+        log.info("FileServiceImpl (node) - getFilePathResponseEntity - Injected token from @Value: [{}]", this.token);
+        log.info("FileServiceImpl (node) - getFilePathResponseEntity - Received fileId parameter: [{}]", fileId);
+        log.info("FileServiceImpl (node) - getFilePathResponseEntity - Using fileInfoUri from @Value (as template for RestTemplate): [{}]", this.fileInfoUri);
+
+
+        String effectiveUrl = "URL_FORMATION_ERROR_OR_NULL_PARAMS";
+        if (this.fileInfoUri != null && this.token != null && fileId != null) {
+
+            log.info("FileServiceImpl (node) - getFilePathResponseEntity - URI template for RestTemplate: [{}]", this.fileInfoUri);
+            log.info("FileServiceImpl (node) - getFilePathResponseEntity - Value for {{fileId}} (to be substituted by RestTemplate): [{}]", fileId);
+
+            effectiveUrl = this.fileInfoUri.replace("{fileId}", fileId);
+            log.info("FileServiceImpl (node) - getFilePathResponseEntity - Expected final URL after RestTemplate substitution: [{}]", effectiveUrl);
+        } else {
+            log.warn("FileServiceImpl (node) - getFilePathResponseEntity - One or more params for URL formation are null. Token: [{}], FileId: [{}], UriTemplate: [{}]", this.token, fileId, this.fileInfoUri);
+        }
+
         try {
-            log.debug("Requesting file path for fileId: {}", fileId);
+            log.debug("Requesting file path for fileId (original debug): {}", fileId);
+
+
             ResponseEntity<String> response = restTemplate.exchange(
-                    fileInfoUri,
+                    this.fileInfoUri,
                     HttpMethod.GET,
                     request,
                     String.class,
-                    token, fileId
+                    fileId
             );
             log.debug("Received response for fileId {}: {}", fileId, response.getStatusCode());
             return response;
         } catch (Exception e) {
-            log.error("Error requesting file path for fileId {}: ", fileId, e);
+            log.error("Error during RestTemplate exchange for fileId {}: {}", fileId, e.getMessage());
             throw new UploadFileException("Error requesting file path from Telegram: " + e.getMessage(), e);
         }
     }

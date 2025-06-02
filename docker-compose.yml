@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  dispatcher:
+    build: ./dispatcher
+    container_name: dispatcher-service
+    restart: unless-stopped
+    ports:
+      - "8084:8084"
+    environment:
+      - SERVER_PORT=8084
+      - BOT_NAME=${BOT_NAME}
+      - BOT_TOKEN=${BOT_TOKEN}
+      - BOT_URI=${BOT_URI}
+      - SERVER_SSL_ENABLED=false
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - SPRING_RABBITMQ_PORT=5672
+      - SPRING_RABBITMQ_USERNAME=${RABBITMQ_USER}
+      - SPRING_RABBITMQ_PASSWORD=${RABBITMQ_PASS}
+    networks:
+      - my_project_network
+    depends_on:
+      - node
+
+  node:
+    build: ./node
+    container_name: node-service
+    restart: unless-stopped
+    ports:
+      - "8085:8085"
+    environment:
+      - SERVER_PORT=8085
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - SPRING_RABBITMQ_PORT=5672
+      - SPRING_RABBITMQ_USERNAME=${RABBITMQ_USER}
+      - SPRING_RABBITMQ_PASSWORD=${RABBITMQ_PASS}
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://basetg:5432/basetg
+      - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER}
+      - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASS}
+      - SPRING_JPA_GENERATE_DDL=true
+      - TOKEN_TELEGRAM_API=${BOT_TOKEN}
+      - SERVICE_FILE_INFO_URI=https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id={fileId}
+      - SERVICE_FILE_STORAGE_URI=https://api.telegram.org/file/bot${BOT_TOKEN}/{filePath}
+      - SERVICE_MAIL_URI=http://mail-service:8087
+      - SERVICE_CONVERTER_URI=http://converter-service:8083
+      - LINK_ADDRESS=${EXTERNAL_HOST_ADDRESS}:8086
+      - SALT_CRYPTO=${CRYPTO_SALT}
+    networks:
+      - my_project_network
+    depends_on:
+      - converter-service
+      - mail-service
+      - rest-service
+
+  mail-service:
+    build: ./mail-service
+    container_name: mail-service
+    restart: unless-stopped
+    ports:
+      - "8087:8087"
+    environment:
+      - SERVER_PORT=8087
+      - SPRING_MAIL_HOST=${SPRING_MAIL_HOST}
+      - SPRING_MAIL_PORT=${SPRING_MAIL_PORT}
+      - SPRING_MAIL_USERNAME=${GMAIL_USER}
+      - SPRING_MAIL_PASSWORD=${GMAIL_APP_PASS}
+      - SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH=true
+      - SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE=true
+      - SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_REQUIRED=true
+      - SPRING_MAIL_PERSONAL_NAME=Support ContentTGD
+      - SPRING_MAIL_PROPERTIES_MAIL_DEBUG=true
+      - SERVICE_ACTIVATION_URI=${EXTERNAL_HOST_ADDRESS}:8086/user/activation?id={id}
+    networks:
+      - my_project_network
+
+  rest-service:
+    build: ./rest-service
+    container_name: rest-service
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    environment:
+      - SERVER_PORT=8086
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://basetg:5432/basetg
+      - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER}
+      - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASS}
+      - SPRING_JPA_GENERATE_DDL=true
+      - SALT_CRYPTO=${CRYPTO_SALT}
+    networks:
+      - my_project_network
+
+  converter-service:
+    build: ./converter-service
+    container_name: converter-service
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    environment:
+      - SERVER_PORT=8083
+      - SPRING_APPLICATION_NAME=converter-service
+      - SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE=50MB
+      - SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE=50MB
+    networks:
+      - my_project_network
+
+networks:
+  my_project_network:
+    external: true
