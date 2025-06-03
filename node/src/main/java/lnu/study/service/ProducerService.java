@@ -4,29 +4,27 @@ import lnu.study.dto.AudioToSendDTO;
 import lnu.study.dto.DocumentToSendDTO;
 import lnu.study.dto.PhotoToSendDTO;
 import lnu.study.dto.VideoToSendDTO;
-import org.telegram.telegrambots.meta.api.methods.send.SendDocument; // <<< НОВИЙ ІМПОРТ
+import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
-import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;   // <<< НОВИЙ ІМПОРТ
-// Можна також додати SendAudio, SendVideo, якщо плануєте їх конвертувати
+import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 
 public interface ProducerService {
 
     void producerAnswer(SendMessage sendMessage);
 
-    void producerSendDocument(SendDocument sendDocument); // <<< НОВИЙ МЕТОД
+    void producerSendDocument(SendDocument sendDocument);
 
     void producerSendPhoto(SendPhoto sendPhoto);
 
     void producerSendPhotoDTO(PhotoToSendDTO photoToSendDTO);
 
-    void producerSendDocumentDTO(DocumentToSendDTO documentToSendDTO);// <<< НОВИЙ МЕТОД
+    void producerSendDocumentDTO(DocumentToSendDTO documentToSendDTO);
 
     void producerSendAudioDTO(AudioToSendDTO audioToSendDTO);
 
-    void producerSendVideoDTO(VideoToSendDTO videoToSendDTO);// Новий метод
+    void producerSendVideoDTO(VideoToSendDTO videoToSendDTO);
 
     void producerAnswerCallbackQuery(String callbackQueryId, String text);
 
-    // Альтернативно, один більш загальний метод, якщо хочете:
-    // void producerSendBotApiMethod(org.telegram.telegrambots.meta.api.methods.BotApiMethod<?> method);
+
 }

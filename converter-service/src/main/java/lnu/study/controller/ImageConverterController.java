@@ -2,7 +2,6 @@ package lnu.study.controller;
 
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -134,7 +133,7 @@ public class ImageConverterController {
         if (filename == null) return "converted-file";
         int lastDot = filename.lastIndexOf('.');
         if (lastDot == -1) {
-            return filename; // Нет расширения
+            return filename;
         }
         return filename.substring(0, lastDot);
     }

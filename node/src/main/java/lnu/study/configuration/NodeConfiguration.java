@@ -1,19 +1,18 @@
 package lnu.study.configuration;
 
-import lnu.study.utils.CryptoTool; // Ти використовуєш CryptoTool з common-utils
+import lnu.study.utils.CryptoTool;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestTemplate;
-// Якщо будеш використовувати @Getter від Lombok для поля, додай імпорт:
-// import lombok.Getter;
+
 
 @Configuration
 public class NodeConfiguration {
-    @Value("${salt}") // Виправлена одруківка
+    @Value("${salt}")
     private String salt;
 
-    @Value("${token}") // Зчитуємо властивість 'token'
+    @Value("${token}")
     private String botToken;
 
     // Додаємо getter для botToken

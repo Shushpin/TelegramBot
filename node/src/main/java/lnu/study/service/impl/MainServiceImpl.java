@@ -4,8 +4,6 @@ import lnu.study.dao.AppUserDAO;
 import lnu.study.dao.RawDataDAO;
 import lnu.study.dto.AudioToSendDTO;
 import lnu.study.dto.DocumentToSendDTO;
-import lnu.study.dto.PhotoToSendDTO;
-import lnu.study.dto.VideoToSendDTO;
 import lnu.study.entity.*;
 import lnu.study.exceptions.UploadFileException;
 import lnu.study.service.*;
@@ -31,9 +29,9 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import lnu.study.dto.ArchiveFileDetailDTO; // <--- НАШ НОВИЙ DTO
-import java.util.Map;                       // <--- Для ConcurrentHashMap
-import java.util.concurrent.ConcurrentHashMap; // <--- Для ConcurrentHashMap
+import lnu.study.dto.ArchiveFileDetailDTO;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Arrays;
 import java.util.Comparator;
 
@@ -151,8 +149,8 @@ public class MainServiceImpl implements MainService {
                 output = "Ви в режимі конвертації. Надішліть файл для обробки:\n" +
                         "- Фото\n" +
                         "- Відео\n" +
-                        "- Голосове або аудіо файл\n" +
-                        "- DOCX (в PDF чи ODT,конвертація може зайняти до 5 хвилин) \n\n" +
+                        "- Текстовий файл \n" +
+                        "- Голосове повідомлення або аудіо файл\n\n" +
                         "Для виходу з режиму конвертації: /cancel\n" +
                         "Для переходу в режим архіватора: /create_archive\n" +
                         "Для переходу в режим файлообмінника: /generate_link";
@@ -224,42 +222,35 @@ public class MainServiceImpl implements MainService {
 
         var chatId = update.getMessage().getChatId();
         Message message = update.getMessage();
-        // ОБРОБКА ДОКУМЕНТІВ ДЛЯ АРХІВУВАННЯ
-        if (ARCHIVING_FILES.equals(appUser.getState())) {
-            Message currentMessage = update.getMessage(); // Отримуємо поточне повідомлення
-            Document document = currentMessage.getDocument();
+        Document document = message.getDocument(); // Отримуємо документ один раз на початку
 
+        // ОБРОБКА ДОКУМЕНТІВ ДЛЯ АРХІВУВАННЯ (залишається без змін)
+        if (ARCHIVING_FILES.equals(appUser.getState())) {
             if (document != null) {
                 String fileId = document.getFileId();
                 String originalFileName = document.getFileName();
                 if (originalFileName == null || originalFileName.isEmpty()) {
-                    originalFileName = "document_" + fileId; // Базове ім'я, якщо оригінальне відсутнє
+                    originalFileName = "document_" + fileId;
                 }
-
                 ArchiveFileDetailDTO fileDetail = new ArchiveFileDetailDTO(fileId, originalFileName, "document");
-
-                // Додаємо файл до сесії користувача. appUser.getId() - це ID з нашої БД.
                 List<ArchiveFileDetailDTO> userArchiveFiles = archivingSessions.computeIfAbsent(appUser.getId(), k -> new ArrayList<>());
                 userArchiveFiles.add(fileDetail);
                 log.info("Додано документ '{}' (file_id: {}) до сесії архівування для користувача appUserId={}",
                         originalFileName, fileId, appUser.getId());
-
-                // Надсилаємо повідомлення з кнопками
                 sendArchiveOptions(chatId, "Файл '" + originalFileName + "' отримано.");
             } else {
-                // Це малоймовірно, якщо Telegram правильно маршрутизував як DocMessage, але для повноти
                 log.warn("Очікувався документ для архівування від користувача appUserId={}, але він відсутній.", appUser.getId());
                 sendAnswer("Помилка: очікувався документ, але його не знайдено. Спробуйте надіслати ще раз.", chatId);
             }
-            return; // Важливо завершити обробку тут, щоб не виконувалася стандартна логіка збереження/конвертації
+            return;
         }
 
+        // ОБРОБКА ДОКУМЕНТІВ ДЛЯ КОНВЕРТАЦІЇ
         if (AWAITING_FILE_FOR_CONVERSION.equals(appUser.getState())) {
             if (!appUser.isActive()) {
                 sendAnswer("Будь ласка, активуйте акаунт.", chatId); return;
             }
-            Document document = message.getDocument();
-            if (document == null) {
+            if (document == null) { // Перевіряємо чи документ існує
                 sendAnswer("Помилка: очікувався документ.", chatId); return;
             }
 
@@ -267,133 +258,93 @@ public class MainServiceImpl implements MainService {
             String mimeType = document.getMimeType() != null ? document.getMimeType().toLowerCase() : "";
             String fileId = document.getFileId();
 
-            boolean isDocx = (originalFileName != null && originalFileName.toLowerCase().endsWith(".docx")) ||
-                    mimeType.equals("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
-            boolean isPhotoAsDocument = mimeType.startsWith("image/");
-            boolean isVideoAsDocument = mimeType.startsWith("video/") || SUPPORTED_VIDEO_MIME_TYPES.contains(mimeType);
+            boolean isConvertibleDocument = isSupportedDocumentForConversion(originalFileName, mimeType);
+            boolean isPhotoAsDocument = mimeType.startsWith("image/"); // Залишаємо як є
+            boolean isVideoAsDocument = mimeType.startsWith("video/") || SUPPORTED_VIDEO_MIME_TYPES.contains(mimeType); // Залишаємо як є
 
-            if (isDocx || isPhotoAsDocument || isVideoAsDocument) {
-                byte[] fileData;
-                try {
-                    fileData = fileService.downloadFileAsByteArray(fileId);
-                    if (fileData == null || fileData.length == 0) throw new UploadFileException("Файл порожній.");
-                    log.info("Downloaded file (doc/photo/video) for conversion: {}, MIME: {}, Size: {}", originalFileName, mimeType, fileData.length);
-                } catch (Exception e) {
-                    log.error("Failed to download file for conversion: {}", e.getMessage());
-                    sendAnswer("Не вдалося завантажити файл. Спробуйте ще.", chatId); return;
-                }
+            if (isConvertibleDocument) { // Якщо це документ, який ми можемо конвертувати
+                // Завантаження файлу не потрібне на цьому етапі, воно відбудеться після вибору формату
+                log.info("Convertible document received: UserID: {}, FileID: {}, FileName: {}, MIME: {}. Switching to AWAITING_TARGET_FORMAT_SELECTION.",
+                        appUser.getTelegramUserId(), fileId, originalFileName, mimeType);
 
-                if ((isPhotoAsDocument || isVideoAsDocument) && (originalFileName == null || originalFileName.isEmpty() || !originalFileName.contains("."))) {
-                    String prefix = isPhotoAsDocument ? "photo_doc" : "video_doc";
-                    String ext = isPhotoAsDocument ? (mimeType.contains("png") ? "png" : "jpg") : (mimeType.contains("mp4") ? "mp4" : "avi");
-                    originalFileName = prefix + "_" + appUser.getTelegramUserId() + "_" + System.currentTimeMillis() + "." + ext;
-                    log.info("Generated filename for media sent as document: {}", originalFileName);
-                }
-                final String finalOriginalFileName = originalFileName;
+                appUser.setPendingFileId(fileId);
+                appUser.setPendingOriginalFileName(originalFileName);
+                appUser.setPendingFileType("document"); // Встановлюємо загальний тип "document"
+                appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
+                appUserDAO.save(appUser);
 
-                ByteArrayResource fileResource = new ByteArrayResource(fileData) {
-                    @Override public String getFilename() { return finalOriginalFileName; }
-                };
-
-                String targetFormat = null;
-                String converterApiEndpoint = null;
-                String fileTypeDescription = null;
-                ResponseEntity<byte[]> response = null;
-                boolean conversionSuccess = false;
-
-                sendAnswer("Файл '" + finalOriginalFileName + "' отримано. Розпочинаю конвертацію...", chatId);
-
-                try {
-                    if (isDocx) {
-                        log.info("DOCX received from user {}. FileID: {}, FileName: {}. Switching to AWAITING_TARGET_FORMAT_SELECTION for 'document'.",
-                                appUser.getTelegramUserId(), fileId, originalFileName);
-
-                        appUser.setPendingFileId(fileId);
-                        appUser.setPendingOriginalFileName(originalFileName);
-                        appUser.setPendingFileType("document"); // Встановлюємо тип "document"
-                        appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
-                        appUserDAO.save(appUser);
-
-                        sendDocumentFormatSelectionMessage(chatId); // Наш новий метод для показу клавіатури
-                        return; // Важливо завершити тут, очікуємо вибір формату
-                    } else if (isPhotoAsDocument) { // <--- ОСЬ ЦЯ ГІЛКА ЗМІНЮЄТЬСЯ
-                        log.info("Photo received as document from user {}. Switching to AWAITING_TARGET_FORMAT_SELECTION. FileID: {}, FileName: {}", appUser.getTelegramUserId(), fileId, finalOriginalFileName);
-
-                        // Зберігаємо fileId документа (який є фото) та originalFileName
-                        appUser.setPendingFileId(fileId);
-                        appUser.setPendingOriginalFileName(finalOriginalFileName);
-                        appUser.setPendingFileType("photo");
-                        appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
-                        appUserDAO.save(appUser);
-
-                        sendFormatSelectionMessage(chatId, "photo_document");
-                        return; // Дуже важливо завершити тут, ми чекаємо на вибір формату
-                    } else if (isVideoAsDocument) { // <--- ОСЬ ЦЯ ГІЛКА ЗМІНЮЄТЬСЯ
-                        log.info("Video received as document from user {}. Switching to AWAITING_TARGET_FORMAT_SELECTION. FileID: {}, FileName: {}",
-                                appUser.getTelegramUserId(), fileId, finalOriginalFileName);
-
-                        appUser.setPendingFileId(fileId); // fileId документа (який є відео)
-                        appUser.setPendingOriginalFileName(finalOriginalFileName);
-                        appUser.setPendingFileType("video"); // <--- Встановлюємо тип
-                        appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
-                        appUserDAO.save(appUser);
-
-                        sendVideoFormatSelectionMessage(chatId); // <--- Новий метод для вибору формату відео
-                        return; // Дуже важливо завершити тут, ми чекаємо на вибір формату
-                    }
-
-                    if (response != null && response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-                        byte[] convertedFileData = response.getBody();
-                        String baseName = finalOriginalFileName.contains(".") ? finalOriginalFileName.substring(0, finalOriginalFileName.lastIndexOf('.')) : finalOriginalFileName;
-                        String convertedFileName = "converted_" + baseName + "." + targetFormat;
-
-                        if (isDocx) {
-                            producerService.producerSendDocumentDTO(DocumentToSendDTO.builder()
-                                    .chatId(chatId.toString()).documentBytes(convertedFileData).fileName(convertedFileName).caption("Сконвертовано: "+finalOriginalFileName).build());
-                        } else if (isPhotoAsDocument) {
-                            producerService.producerSendPhotoDTO(PhotoToSendDTO.builder()
-                                    .chatId(chatId.toString()).photoBytes(convertedFileData).fileName(convertedFileName).caption("Сконвертовано: "+finalOriginalFileName).build());
-                        } else if (isVideoAsDocument) {
-                            VideoToSendDTO videoDTO = VideoToSendDTO.builder()
-                                    .chatId(chatId.toString()).videoBytes(convertedFileData).fileName(convertedFileName)
-                                    .caption("Сконвертоване відео: " + finalOriginalFileName).build();
-                            producerService.producerSendVideoDTO(videoDTO);
-                        }
-                        // sendAnswer(fileTypeDescription + " '" + finalOriginalFileName + "' успішно сконвертовано!", chatId); // Повідомлення перенесено в sendPostConversionMessage
-                        conversionSuccess = true;
-                    } else {
-                        log.error("Conversion failed for {} '{}'. Status: {}", fileTypeDescription, finalOriginalFileName, response != null ? response.getStatusCode() : "N/A");
-                        sendAnswer("Помилка конвертації " + (fileTypeDescription != null ? fileTypeDescription.toLowerCase() : "файлу") + ". " + (response != null ? "Статус: " + response.getStatusCode() : ""), chatId);
-                    }
-                } catch (Exception e) {
-                    log.error("Exception during conversion call for {}: {}", finalOriginalFileName, e.getMessage(), e);
-                    sendAnswer("Критична помилка сервісу конвертації для " + (fileTypeDescription != null ? fileTypeDescription.toLowerCase() : "файлу") + ".", chatId);
-                } finally {
-                    // ВАЖЛИВО: Стан НЕ змінюється тут, якщо була конвертація
-                    if (conversionSuccess) {
-                        sendPostConversionMessage(chatId);
-                    }
-                    // Якщо сталася помилка ДО або ПІД ЧАС конвертації, користувач залишається в AWAITING_FILE_FOR_CONVERSION,
-                    // щоб спробувати ще раз або скасувати. Якщо це небажано, можна додати логіку зміни стану при помилці.
-                }
+                sendDocumentFormatSelectionMessage(chatId); // Цей метод ми оновимо наступним
+                return;
+            } else if (isPhotoAsDocument) {
+                // Логіка для фото, відправлених як документ (залишається без змін)
+                log.info("Photo received as document from user {}. Switching to AWAITING_TARGET_FORMAT_SELECTION. FileID: {}, FileName: {}", appUser.getTelegramUserId(), fileId, originalFileName);
+                appUser.setPendingFileId(fileId);
+                appUser.setPendingOriginalFileName(originalFileName);
+                appUser.setPendingFileType("photo");
+                appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
+                appUserDAO.save(appUser);
+                sendFormatSelectionMessage(chatId, "photo_document");
+                return;
+            } else if (isVideoAsDocument) {
+                // Логіка для відео, відправлених як документ (залишається без змін)
+                log.info("Video received as document from user {}. Switching to AWAITING_TARGET_FORMAT_SELECTION. FileID: {}, FileName: {}",
+                        appUser.getTelegramUserId(), fileId, originalFileName);
+                appUser.setPendingFileId(fileId);
+                appUser.setPendingOriginalFileName(originalFileName); // Використовуємо originalFileName
+                appUser.setPendingFileType("video");
+                appUser.setState(AWAITING_TARGET_FORMAT_SELECTION);
+                appUserDAO.save(appUser);
+                sendVideoFormatSelectionMessage(chatId);
+                return;
             } else {
-                sendAnswer("Цей тип документа не підтримується для конвертації. Очікую DOCX, фото, або відео.", chatId);
-                sendPostConversionMessage(chatId); // Нагадуємо про можливість надіслати інший файл
+                // Якщо файл не є документом для конвертації, фото або відео
+                sendAnswer("Цей тип файлу не підтримується для конвертації в поточному режимі. Очікую документ (напр., DOCX, PDF, ODT, TXT), фото, або відео.", chatId);
+                sendPostConversionMessage(chatId);
             }
-        } else {
-            log.info("User {} sent a document (not for conversion).", appUser.getTelegramUserId());
+        } else { // Якщо стан не ARCHIVING_FILES і не AWAITING_FILE_FOR_CONVERSION
+            log.info("User {} sent a document (not for archiving or conversion). Processing for link generation.", appUser.getTelegramUserId());
             String permissionError = checkPermissionError(appUser);
             if (permissionError != null) { sendAnswer(permissionError, chatId); return; }
             try {
-                AppDocument doc = fileService.processDoc(message);
-                if (doc != null) {
-                    String link = fileService.generateLink(doc.getId(), LinkType.GET_DOC);
-                    String outputMessage = "Документ '" + doc.getDocName() + "'завантажено. Посилання: " + link
-                            + "\n\nДля виходу з режиму генерації посилань натисніть /cancel або відправте наступний файл.";
-                    sendAnswer(outputMessage, chatId);
-                } else { sendAnswer("Не вдалося обробити документ.", chatId); }
-            } catch (Exception e) { sendAnswer("Помилка при збереженні документа.", chatId); }
+                if (document != null) { // Переконуємось, що документ є перед обробкою
+                    AppDocument doc = fileService.processDoc(message); // message вже містить document
+                    if (doc != null) {
+                        String link = fileService.generateLink(doc.getId(), LinkType.GET_DOC);
+                        String outputMessage = "Документ '" + doc.getDocName() + "' завантажено. Посилання: " + link
+                                + "\n\nДля виходу з режиму генерації посилань натисніть /cancel або відправте наступний файл.";
+                        sendAnswer(outputMessage, chatId);
+                    } else { sendAnswer("Не вдалося обробити документ для генерації посилання.", chatId); }
+                } else {
+                    sendAnswer("Помилка: отримано порожнє повідомлення типу документ.", chatId);
+                }
+            } catch (Exception e) {
+                log.error("Помилка при збереженні документа для генерації посилання: {}", e.getMessage(), e);
+                sendAnswer("Помилка при збереженні документа.", chatId);
+            }
         }
+    }
+
+    // Допоміжний метод для перевірки, чи є файл документом, який підтримується для конвертації
+    private boolean isSupportedDocumentForConversion(String fileName, String mimeType) {
+        if (mimeType != null && !mimeType.isEmpty()) {
+            // Перевірка за MIME-типом
+            return mimeType.equals("application/msword") || // .doc
+                    mimeType.equals("application/vnd.openxmlformats-officedocument.wordprocessingml.document") || // .docx
+                    mimeType.equals("application/vnd.oasis.opendocument.text") || // .odt
+                    mimeType.equals("application/pdf") || // .pdf
+                    mimeType.equals("text/plain") || // .txt
+                    mimeType.equals("application/rtf"); // .rtf
+        } else if (fileName != null && !fileName.isEmpty()) {
+            // Резервна перевірка за розширенням, якщо MIME-тип відсутній
+            String lowerCaseFileName = fileName.toLowerCase();
+            return lowerCaseFileName.endsWith(".doc") ||
+                    lowerCaseFileName.endsWith(".docx") ||
+                    lowerCaseFileName.endsWith(".odt") ||
+                    lowerCaseFileName.endsWith(".pdf") ||
+                    lowerCaseFileName.endsWith(".txt") ||
+                    lowerCaseFileName.endsWith(".rtf");
+        }
+        return false;
     }
 
     private void sendArchiveOptions(Long chatId, String precedingText) {
@@ -419,13 +370,13 @@ public class MainServiceImpl implements MainService {
         rowsInline.add(rowMainButtons); // Додаємо перший ряд
 
         // Другий ряд для кнопки "Скасувати"
-        List<InlineKeyboardButton> rowCancelButton = new ArrayList<>(); // <--- НОВИЙ РЯД
-        InlineKeyboardButton cancelArchiveButton = new InlineKeyboardButton(); // <--- НОВА КНОПКА
-        cancelArchiveButton.setText("❌ Скасувати сесію"); // <--- ТЕКСТ КНОПКИ
-        cancelArchiveButton.setCallbackData("ARCHIVE_CANCEL_SESSION");    // <--- НОВІ CALLBACK-ДАНІ
+        List<InlineKeyboardButton> rowCancelButton = new ArrayList<>();
+        InlineKeyboardButton cancelArchiveButton = new InlineKeyboardButton();
+        cancelArchiveButton.setText("❌ Скасувати сесію");
+        cancelArchiveButton.setCallbackData("ARCHIVE_CANCEL_SESSION");
 
-        rowCancelButton.add(cancelArchiveButton); // <--- ДОДАЄМО КНОПКУ В РЯД
-        rowsInline.add(rowCancelButton); // <--- ДОДАЄМО РЯД ДО КЛАВІАТУРИ
+        rowCancelButton.add(cancelArchiveButton);
+        rowsInline.add(rowCancelButton);
 
         markupInline.setKeyboard(rowsInline);
         sendMessage.setReplyMarkup(markupInline);
@@ -437,30 +388,35 @@ public class MainServiceImpl implements MainService {
     private void sendDocumentFormatSelectionMessage(Long chatId) {
         SendMessage sendMessage = new SendMessage();
         sendMessage.setChatId(chatId.toString());
-        sendMessage.setText("Оберіть цільовий формат для конвертації документа (.docx):");
+        // Оновлюємо текст повідомлення, оскільки тепер приймаємо не тільки .docx
+        sendMessage.setText("Оберіть цільовий формат для конвертації вашого документа:");
 
         InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
         List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
 
+        // Перший ряд кнопок (PDF, ODT)
         List<InlineKeyboardButton> rowInline1 = new ArrayList<>();
         rowInline1.add(InlineKeyboardButton.builder().text("PDF").callbackData("format_select_doc_pdf").build());
         rowInline1.add(InlineKeyboardButton.builder().text("ODT").callbackData("format_select_doc_odt").build());
-        // Можна додати інші формати, наприклад, конвертація в TXT або назад в DOCX (якщо потрібно перезберегти)
-        // rowInline1.add(InlineKeyboardButton.builder().text("DOCX").callbackData("format_select_doc_docx").build());
-        // rowInline1.add(InlineKeyboardButton.builder().text("TXT").callbackData("format_select_doc_txt").build());
 
+        // Другий ряд кнопок (DOCX, TXT)
+        List<InlineKeyboardButton> rowInline2 = new ArrayList<>();
+        rowInline2.add(InlineKeyboardButton.builder().text("DOCX").callbackData("format_select_doc_docx").build());
+        rowInline2.add(InlineKeyboardButton.builder().text("TXT").callbackData("format_select_doc_txt").build());
 
+        // Ряд для кнопки "Скасувати"
         List<InlineKeyboardButton> rowCancel = new ArrayList<>();
         rowCancel.add(InlineKeyboardButton.builder().text("❌ Скасувати вибір").callbackData("cancel_format_selection").build());
 
-        rowsInline.add(rowInline1);
-        rowsInline.add(rowCancel);
+        rowsInline.add(rowInline1); // Додаємо перший ряд
+        rowsInline.add(rowInline2); // Додаємо другий ряд
+        rowsInline.add(rowCancel);  // Додаємо ряд зі скасуванням
 
         markupInline.setKeyboard(rowsInline);
         sendMessage.setReplyMarkup(markupInline);
 
         producerService.producerAnswer(sendMessage);
-        log.info("Sent document format selection keyboard to chat_id: {}", chatId);
+        log.info("Sent document format selection keyboard (PDF, ODT, DOCX, TXT) to chat_id: {}", chatId);
     }
 
     @Override
@@ -761,9 +717,8 @@ public class MainServiceImpl implements MainService {
 
         } else {
             log.info("User {} sent a video message, but not in AWAITING_FILE_FOR_CONVERSION state.", appUser.getTelegramUserId());
-            // Тут можна або просто проігнорувати (якщо не очікуємо відео для файлообмінника),
-            // або запропонувати перейти в режим конвертації, або обробити як файл для обміну, якщо така логіка є.
-            // Поки що залишимо як є - пропонуємо перейти в режим конвертації.
+
+
             sendAnswer("Відео отримано, але бот не в режимі конвертації. Використайте /convert_file, щоб увімкнути цей режим, " +
                     "або /generate_link, щоб просто поділитись файлом.", chatId);
         }
@@ -802,9 +757,6 @@ public class MainServiceImpl implements MainService {
         producerService.producerAnswer(sendMessage);
         log.info("Sent video format selection keyboard to chat_id: {}", chatId);
     }
-
-
-    //TODO: dlya perevirky
 
 
     @Override
@@ -1177,7 +1129,7 @@ public class MainServiceImpl implements MainService {
             } else {
                 // Тут буде логіка створення архіву (Крок 3)
                 log.info("Користувач appUserId={} натиснув 'Створити архів'. Кількість файлів: {}", appUser.getId(), filesToArchive.size());
-                sendAnswer("Розпочинаю створення архіву з " + filesToArchive.size() + " файлів... (реалізація на наступному етапі)", chatId);
+                sendAnswer("Розпочинаю створення архіву з " + filesToArchive.size() + " файлів...", chatId);
                 producerService.producerAnswerCallbackQuery(callbackQuery.getId(), "Обробка..."); // Повідомлення для кнопки, що процес почався
 
                 try {
@@ -1814,15 +1766,9 @@ public class MainServiceImpl implements MainService {
         List<InlineKeyboardButton> rowCancel = new ArrayList<>();
         rowCancel.add(InlineKeyboardButton.builder().text("❌ Скасувати вибір").callbackData("cancel_format_selection").build());
 
-        // Можна додати M4A (AAC) або інші
-        // List<InlineKeyboardButton> rowInline3 = new ArrayList<>();
-        // rowInline3.add(InlineKeyboardButton.builder().text("M4A (AAC)").callbackData("format_select_audio_m4a").build());
-
         rowsInline.add(rowInline1);
         rowsInline.add(rowInline2);
         rowsInline.add(rowCancel);
-
-        // if (!rowInline3.isEmpty()) rowsInline.add(rowInline3);
 
         markupInline.setKeyboard(rowsInline);
         sendMessage.setReplyMarkup(markupInline);

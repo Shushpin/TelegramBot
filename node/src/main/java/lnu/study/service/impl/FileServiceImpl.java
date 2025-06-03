@@ -53,7 +53,7 @@ public class FileServiceImpl implements FileService {
     private final BinaryContentDAO binaryContentDAO;
     private final AppVideoDAO appVideoDAO;
     private final CryptoTool cryptoTool;
-    private final AppAudioDAO appAudioDAO; // <--- ОГОЛОШЕННЯ ПОЛЯ
+    private final AppAudioDAO appAudioDAO;
 
 
     public FileServiceImpl(AppDocumentDAO appDocumentDAO,
@@ -97,7 +97,6 @@ public class FileServiceImpl implements FileService {
             log.error("Message does not contain photos: " + telegramMessage.getMessageId());
             return null;
         }
-        //TODO: пока что обрабатываем только одно фото в сообщении (найбільше за розміром)
         PhotoSize telegramPhoto = photoSizes.get(photoSizes.size() - 1);
 
         String fileId = telegramPhoto.getFileId();
@@ -137,7 +136,7 @@ public class FileServiceImpl implements FileService {
             }
         } else if (telegramVoice != null) {
             fileIdInput = telegramVoice.getFileId();
-            mimeTypeInput = telegramVoice.getMimeType(); // Зазвичай "audio/ogg"
+            mimeTypeInput = telegramVoice.getMimeType();
             fileSizeInput = telegramVoice.getFileSize();
             durationInput = telegramVoice.getDuration();
             fileNameInput = "voice_" + fileIdInput + ".ogg"; // Для голосових генеруємо ім'я
@@ -193,12 +192,11 @@ public class FileServiceImpl implements FileService {
         String fileNameInput = telegramVideo.getFileName();
 
         if (fileNameInput == null || fileNameInput.isBlank()) {
-            String extension = ".mp4"; // Базове розширення
+            String extension = ".mp4";
             if (mimeTypeInput != null) {
                 if (mimeTypeInput.contains("mp4")) extension = ".mp4";
                 else if (mimeTypeInput.contains("quicktime")) extension = ".mov";
                 else if (mimeTypeInput.contains("x-matroska")) extension = ".mkv";
-                // Додайте інші MIME-типи за потреби
             }
             fileNameInput = "video_" + fileIdInput + extension;
         }
@@ -359,8 +357,7 @@ public class FileServiceImpl implements FileService {
         ResponseEntity<String> response = getFilePathResponseEntity(fileId); // Використовуємо існуючий метод
         if (response.getStatusCode() == HttpStatus.OK) {
             String filePath = getFilePathFromJsonResponse(response); // Використовуємо існуючий метод
-            // Тепер викликаємо downloadFile, який повертає byte[]
-            // Цей метод вже є у вас і робить саме те, що нам потрібно!
+
             return downloadFile(filePath);
         } else {
             log.error("Failed to get file path for fileId {} during direct download. Response: {}", fileId, response);
@@ -388,20 +385,16 @@ public class FileServiceImpl implements FileService {
                         originalFileNameInArchive, telegramFileId);
 
                 try {
-                    // Крок 1: Отримати шлях до файлу (file_path) з Telegram
-                    // Використовуємо існуючий метод getFilePathResponseEntity, який вже має логіку запиту до fileInfoUri
-                    // і використовує поле 'token', що інжектується через @Value.
+
                     ResponseEntity<String> filePathResponse = getFilePathResponseEntity(telegramFileId);
 
                     if (filePathResponse.getStatusCode() == HttpStatus.OK) {
-                        String telegramFilePath = getFilePathFromJsonResponse(filePathResponse); // Використовуємо існуючий метод
+                        String telegramFilePath = getFilePathFromJsonResponse(filePathResponse);
 
-                        // Крок 2: Завантажити файл за отриманим file_path
-                        // Використовуємо існуючий метод downloadFile
+
                         byte[] fileBytes = downloadFile(telegramFilePath);
 
                         if (fileBytes != null && fileBytes.length > 0) {
-                            // Крок 3: Додати файл до ZIP-архіву
                             ZipEntry zipEntry = new ZipEntry(originalFileNameInArchive);
                             zos.putNextEntry(zipEntry);
                             zos.write(fileBytes);
@@ -415,15 +408,13 @@ public class FileServiceImpl implements FileService {
                         log.error("Не вдалося отримати шлях для файлу '{}' (file_id: {}). Статус: {}. Файл пропускається.",
                                 originalFileNameInArchive, telegramFileId, filePathResponse.getStatusCode());
                     }
-                } catch (UploadFileException e) { // Твій UploadFileException вже є
+                } catch (UploadFileException e) {
                     log.error("Помилка UploadFileException при обробці файлу '{}' (file_id: {}) для архіву: {}. Файл пропускається.",
                             originalFileNameInArchive, telegramFileId, e.getMessage());
                 } catch (Exception e) { // Інші можливі винятки (напр. IOException при записі в ZIP)
                     log.error("Загальна помилка при обробці файлу '{}' (file_id: {}) для архіву: {}. Файл пропускається.",
                             originalFileNameInArchive, telegramFileId, e.getMessage(), e);
-                    // Якщо це IOException від zos.write/closeEntry, його потрібно прокинути або обробити інакше
-                    // В даному випадку, якщо один файл не вдалося додати, ми логуємо і продовжуємо з іншими.
-                    // Якщо потрібно зупинити весь процес - можна прокинути IOException далі.
+
                 }
             }
             zos.finish(); // Завершуємо запис даних ZIP (важливо перед baos.toByteArray())

@@ -22,5 +22,5 @@ public interface FileService {
     byte[] createZipArchiveFromTelegramFiles(List<ArchiveFileDetailDTO> filesToArchiveDetails) throws IOException;
 
     // Новий метод для збереження згенерованого архіву
-    AppDocument saveGeneratedArchive(AppUser appUser, byte[] archiveBytes, String archiveFileName); // <--- ДОДАНО МЕТОД
+    AppDocument saveGeneratedArchive(AppUser appUser, byte[] archiveBytes, String archiveFileName);
 }

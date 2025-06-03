@@ -18,7 +18,7 @@ public class VideoConverterController {
 
     private static final Logger LOGGER = Logger.getLogger(VideoConverterController.class.getName());
 
-    @CrossOrigin(origins = "*") // Если нужно принимать запросы с другого домена
+    @CrossOrigin(origins = "*")
     @PostMapping("/convert")
     public ResponseEntity<InputStreamResource> convertVideo(
             @RequestParam("file") MultipartFile file,
@@ -27,28 +27,22 @@ public class VideoConverterController {
         File outputFile = null;
 
         try {
-            // Проверка поддерживаемых форматов
             if (!isSupportedFormat(format)) {
                 LOGGER.log(Level.WARNING, "Unsupported target video format: {0}", format);
                 return ResponseEntity.badRequest().body(null);
             }
 
-            // Ограничение на размер файла (напр. 75 MB для видео)
             if (file.getSize() > 75 * 1024 * 1024) {
                 LOGGER.log(Level.WARNING, "File size exceeds the limit of 75 MB");
                 return ResponseEntity.badRequest().body(null);
             }
 
-            // Сохранение исходного файла
             inputFile = File.createTempFile("input_video", getExtension(file.getOriginalFilename()));
             file.transferTo(inputFile);
 
-            // Создание выходного файла с нужным расширением
             outputFile = File.createTempFile("output_video", "." + format.toLowerCase());
 
-            // Вызов FFmpeg для конвертации видео
-            // Пример простой команды: ffmpeg -y -i input.mp4 output.mkv
-            // При необходимости можно добавить параметры (кодек, битрейт, разрешение и т.д.)
+
             ProcessBuilder processBuilder = new ProcessBuilder(
                     "ffmpeg", "-y",
                     "-i", inputFile.getAbsolutePath(),
@@ -57,7 +51,6 @@ public class VideoConverterController {
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
 
-            // Логирование вывода FFmpeg
             long startTime = System.currentTimeMillis();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line;
@@ -75,14 +68,11 @@ public class VideoConverterController {
                 return ResponseEntity.status(500).body(null);
             }
 
-            // Читаем выходной файл в память
             byte[] fileBytes = Files.readAllBytes(outputFile.toPath());
             InputStreamResource resource = new InputStreamResource(new ByteArrayInputStream(fileBytes));
 
-            // Определяем MIME-тип для видео
             String mimeType = resolveMimeType(format);
 
-            // Получаем оригинальное имя файла без расширения
             String originalFilename = file.getOriginalFilename();
             String baseName = removeExtension(originalFilename);
             String newFilename = baseName + "-converted." + format;
@@ -100,14 +90,12 @@ public class VideoConverterController {
             LOGGER.log(Level.SEVERE, "Error during video conversion: {0}", e.getMessage());
             return ResponseEntity.status(500).body(null);
         } finally {
-            // Удаляем временные файлы
             if (inputFile != null && inputFile.exists()) inputFile.delete();
             if (outputFile != null && outputFile.exists()) outputFile.delete();
         }
     }
 
     private boolean isSupportedFormat(String format) {
-        // Поддерживаемые видеоформаты
         return format.equalsIgnoreCase("mp4") ||
                 format.equalsIgnoreCase("mkv") ||
                 format.equalsIgnoreCase("mov") ||
@@ -142,7 +130,7 @@ public class VideoConverterController {
         if (filename == null) return "converted-file";
         int lastDot = filename.lastIndexOf('.');
         if (lastDot == -1) {
-            return filename; // Нет расширения
+            return filename;
         }
         return filename.substring(0, lastDot);
     }

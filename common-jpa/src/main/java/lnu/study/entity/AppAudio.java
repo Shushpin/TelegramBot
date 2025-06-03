@@ -25,9 +25,4 @@ public class AppAudio {
     private String mimeType;     // MIME-тип (наприклад, "audio/ogg", "audio/mpeg")
     private Integer duration;     // Тривалість в секундах
     private String fileName;       // Ім'я файлу (для Audio є, для Voice генеруємо)
-
-    // Можна додати зв'язок з AppUser, якщо потрібно відстежувати, хто завантажив
-    // @ManyToOne
-    // @JoinColumn(name = "app_user_id")
-    // private AppUser appUser;
 }

@@ -30,14 +30,12 @@ public class ConverterClientServiceImpl implements ConverterClientService {
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
 
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        body.add("file", fileResource); // "file" - це ім'я параметра, яке очікує ваш converter-service
-        body.add("format", targetFormat); // "format" - це ім'я параметра для формату
+        body.add("file", fileResource);
+        body.add("format", targetFormat);
 
         HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
         String fullUri = converterServiceBaseUri + converterApiEndpoint;
-        // Наприклад, converterApiEndpoint може бути "/image/convert", "/audio/convert", "/video/convert", "/document/convert"
-        // або просто "/convert" для ImageConverterController
 
         log.info("Sending file {} to converter service. URI: {}, Target format: {}", originalFileName, fullUri, targetFormat);
 
@@ -66,9 +64,7 @@ public class ConverterClientServiceImpl implements ConverterClientService {
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
 
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        // Переконайтеся, що ByteArrayResource має правильне ім'я файлу для multipart обробки.
-        // Ваш AudioConverterController використовує file.getOriginalFilename(), що надходить від MultipartFile.
-        // Наш ByteArrayResource повинен мати правильно встановлене getFilename().
+
         body.add("file", fileResource); // fileResource.getFilename() повинен бути originalFilename
         body.add("format", targetFormat);
 
@@ -90,10 +86,6 @@ public class ConverterClientServiceImpl implements ConverterClientService {
     }
     @Override
     public ResponseEntity<byte[]> convertVideoFile(ByteArrayResource fileResource, String originalFilename, String targetFormat, String converterApiEndpoint) {
-        // converterApiEndpoint для відео буде, наприклад, "/api/video/convert"
-        // Цей метод може бути майже ідентичним до convertFile, передаючи правильний endpoint.
-        // Або можна просто використовувати convertFile, якщо логіка формування запиту однакова.
-        // Для ясності, якщо це окремий метод:
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);

@@ -18,7 +18,7 @@ public class AudioConverterController {
 
     private static final Logger LOGGER = Logger.getLogger(AudioConverterController.class.getName());
 
-    @CrossOrigin(origins = "*") // Если необходимо принимать запросы с другого домена/порта
+    @CrossOrigin(origins = "*")
     @PostMapping("/convert")
     public ResponseEntity<InputStreamResource> convertAudio(
             @RequestParam("file") MultipartFile file,
@@ -27,37 +27,30 @@ public class AudioConverterController {
         File outputFile = null;
 
         try {
-            // Проверка поддерживаемых форматов
             if (!isSupportedFormat(format)) {
                 LOGGER.log(Level.WARNING, "Unsupported target audio format: {0}", format);
                 return ResponseEntity.badRequest().body(null);
             }
 
-            // Ограничение на размер файла (50 MB)
             if (file.getSize() > 50 * 1024 * 1024) {
                 LOGGER.log(Level.WARNING, "File size exceeds the limit of 50 MB");
                 return ResponseEntity.badRequest().body(null);
             }
 
-            // Сохранение исходного файла во временную директорию
             inputFile = File.createTempFile("input_audio", getExtension(file.getOriginalFilename()));
             file.transferTo(inputFile);
 
-            // Создание выходного файла с нужным расширением
             outputFile = File.createTempFile("output_audio", "." + format.toLowerCase());
 
-            // Вызов FFmpeg для конвертации аудио
-            // Пример: ffmpeg -y -i input.mp3 output.wav
-            // ffmpeg самостоятельно определит входной формат и сгенерирует выходной
+
             ProcessBuilder processBuilder = new ProcessBuilder(
-                    "ffmpeg", "-y",      // -y для перезаписи без запроса
+                    "ffmpeg", "-y",
                     "-i", inputFile.getAbsolutePath(),
                     outputFile.getAbsolutePath()
             );
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
 
-            // Логирование вывода FFmpeg
             long startTime = System.currentTimeMillis();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line;
@@ -75,14 +68,11 @@ public class AudioConverterController {
                 return ResponseEntity.status(500).body(null);
             }
 
-            // Читаем выходной файл в память
             byte[] fileBytes = Files.readAllBytes(outputFile.toPath());
             InputStreamResource resource = new InputStreamResource(new ByteArrayInputStream(fileBytes));
 
-            // Определяем MIME-тип для аудио
             String mimeType = resolveMimeType(format);
 
-            // Получаем оригинальное имя файла без расширения
             String originalFilename = file.getOriginalFilename();
             String baseName = removeExtension(originalFilename);
             String newFilename = baseName + "-converted." + format;
@@ -100,14 +90,12 @@ public class AudioConverterController {
             LOGGER.log(Level.SEVERE, "Error during audio conversion: {0}", e.getMessage());
             return ResponseEntity.status(500).body(null);
         } finally {
-            // Удаляем временные файлы после чтения
             if (inputFile != null && inputFile.exists()) inputFile.delete();
             if (outputFile != null && outputFile.exists()) outputFile.delete();
         }
     }
 
     private boolean isSupportedFormat(String format) {
-        // Добавляем поддержку различных аудиоформатов
         return format.equalsIgnoreCase("mp3") ||
                 format.equalsIgnoreCase("wav") ||
                 format.equalsIgnoreCase("flac") ||
@@ -133,7 +121,7 @@ public class AudioConverterController {
         if (filename == null) return ".tmp";
         int lastIndex = filename.lastIndexOf(".");
         if (lastIndex == -1) {
-            return ".tmp"; // Если расширения нет
+            return ".tmp";
         }
         return filename.substring(lastIndex);
     }
@@ -142,7 +130,7 @@ public class AudioConverterController {
         if (filename == null) return "converted-file";
         int lastDot = filename.lastIndexOf('.');
         if (lastDot == -1) {
-            return filename; // Нет расширения
+            return filename;
         }
         return filename.substring(0, lastDot);
     }

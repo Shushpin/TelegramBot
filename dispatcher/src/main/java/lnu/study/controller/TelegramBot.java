@@ -7,27 +7,25 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramWebhookBot;
 import org.telegram.telegrambots.meta.api.methods.BotApiMethod;
-import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands; // <--- ДОДАНО ІМПОРТ
+import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendVideo;
 import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Update;
-import org.telegram.telegrambots.meta.api.objects.commands.BotCommand; // <--- ДОДАНО ІМПОРТ
+import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
-import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery; // Додай імпорт
-import org.telegram.telegrambots.meta.exceptions.TelegramApiException; // Додай імпорт
+import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 
 
 import java.io.ByteArrayInputStream;
-// import java.io.Serializable; // Цей імпорт не використовується, можна видалити, якщо не потрібен для іншого
-import java.util.ArrayList; // <--- ДОДАНО ІМПОРТ
-import java.util.List;    // <--- ДОДАНО ІМПОРТ
+import java.util.ArrayList;
+import java.util.List;
 
 @Component
 public class TelegramBot extends TelegramWebhookBot {
@@ -35,7 +33,6 @@ public class TelegramBot extends TelegramWebhookBot {
     private static final Logger log = LogManager.getLogger(TelegramBot.class);
 
     private final String botName;
-    // private final String botToken; // botToken передається в super(), тому поле може бути необов'язковим, якщо не використовується деінде
     private final String botUri;
     private final UpdateProcessor updateProcessor;
 
@@ -46,7 +43,6 @@ public class TelegramBot extends TelegramWebhookBot {
                        @Lazy UpdateProcessor updateProcessor) {
         super(botToken); // Передача токена до батьківського класу
         this.botName = botName;
-        // this.botToken = botToken; // Можна закоментувати, якщо не використовується напряму в цьому класі
         this.botUri = botUri;
         this.updateProcessor = updateProcessor;
         log.info("TelegramBot initialized with UpdateProcessor.");
@@ -54,12 +50,9 @@ public class TelegramBot extends TelegramWebhookBot {
 
     @Override
     public BotApiMethod<?> onWebhookUpdateReceived(Update update) {
+
         log.debug("TelegramBot: Webhook update_id: {} received.", update.getUpdateId());
-//         try {
-//             updateProcessor.processUpdate(update); // Обробка оновлень зазвичай відбувається в WebHookController -> UpdateProcessor
-//         } catch (Exception e) {
-//             log.error("TelegramBot: Error processing update_id {} in UpdateProcessor from onWebhookUpdateReceived: {}", update.getUpdateId(), e.getMessage(), e);
-//         }
+
         return null; // Для Webhook ботів, відповідь часто не потрібна або надсилається асинхронно
     }
 
@@ -71,14 +64,13 @@ public class TelegramBot extends TelegramWebhookBot {
             this.setWebhook(setWebhook);
             log.info("Webhook set successfully to URI: {}", this.botUri);
 
-            setBotCommands(); // <--- ВИКЛИК МЕТОДУ ДЛЯ ВСТАНОВЛЕННЯ КОМАНД МЕНЮ
+            setBotCommands();
 
         } catch (TelegramApiException e) {
             log.error("Error during bot initialization (webhook or commands setup): {}", e.getMessage(), e);
         }
     }
 
-    // Новий метод для встановлення команд меню
     private void setBotCommands() {
         List<BotCommand> commands = new ArrayList<>();
         commands.add(new BotCommand("/start", "Розпочати роботу"));
@@ -88,13 +80,9 @@ public class TelegramBot extends TelegramWebhookBot {
         commands.add(new BotCommand("/generate_link", "Увімкнути режим файлообмінника"));
         commands.add(new BotCommand("/registration", "Реєстрація нового користувача"));
         commands.add(new BotCommand("/cancel", "Скасувати дію / Вийти з режиму"));
-//        commands.add(new BotCommand("/resend_email", "Повторно надіслати лист активації"));
 
         SetMyCommands setMyCommandsAction = new SetMyCommands();
         setMyCommandsAction.setCommands(commands);
-        // Для встановлення команд для всіх приватних чатів:
-        // import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeAllPrivateChats;
-        // setMyCommandsAction.setScope(new BotCommandScopeAllPrivateChats());
 
         try {
             this.execute(setMyCommandsAction); // Виконання запиту для встановлення команд
@@ -109,14 +97,9 @@ public class TelegramBot extends TelegramWebhookBot {
         return this.botName;
     }
 
-    // botToken вже передано в super(botToken) і доступний через getBotToken() батьківського класу,
-    // тому окремий метод getBotToken() тут не потрібен, якщо він просто дублює функціонал батька.
-    // Якщо ж є специфічна логіка, то його можна залишити.
-
     @Override
     public String getBotPath() {
         // Шлях, який використовується для вебхука, наприклад, "update" -> <bot_uri>/update
-        // Переконайтесь, що він відповідає тому, що очікує ваш WebHookController
         return "update";
     }
 

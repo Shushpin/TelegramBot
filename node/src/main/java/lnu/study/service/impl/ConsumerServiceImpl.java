@@ -2,15 +2,13 @@ package lnu.study.service.impl;
 
 import lnu.study.service.ConsumerService;
 import lnu.study.service.MainService;
-import lnu.study.service.ProducerService;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Service;
-import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import static lnu.study.model.RabbitQueue.CALLBACK_QUERY_UPDATE;
-import static lnu.study.model.RabbitQueue.AUDIO_MESSAGE_UPDATE; // Додай імпорт
+import static lnu.study.model.RabbitQueue.AUDIO_MESSAGE_UPDATE;
 
 
 
@@ -57,28 +55,22 @@ public class ConsumerServiceImpl implements ConsumerService {
     public void consumeVoiceMessageUpdates(Update update) {
         log.debug("NODE: Voice Message is received from RabbitMQ");
         mainService.processVoiceMessage(update);
+
+
     }
+
+
     @RabbitListener(queues = CALLBACK_QUERY_UPDATE)
     public void consumeCallbackQueryUpdate(@Payload Update update) {
         log.debug("NODE: Callback Query Update is received from queue {}", CALLBACK_QUERY_UPDATE);
         try {
-            // Змінюємо виклик на новий загальний метод обробки callback-ів
-            mainService.processCallbackQuery(update); // <--- ЗМІНЕНО ТУТ
+            mainService.processCallbackQuery(update);
         } catch (Exception e) {
             log.error("Error processing callback query update: {}", e.getMessage(), e);
-            // Тут можна додати логіку для надсилання повідомлення про помилку користувачеві,
-            // або просто логувати, залежно від політики обробки помилок.
-            // Наприклад, можна спробувати відповісти на сам callbackQuery з повідомленням про помилку,
-            // щоб користувач не бачив "вічну загрузку" кнопки.
-            // if (update != null && update.hasCallbackQuery() && update.getCallbackQuery().getId() != null) {
-            // try {
-            // producerService.producerAnswerCallbackQuery(update.getCallbackQuery().getId(), "Помилка обробки");
-            // } catch (Exception answerEx) {
-            // log.error("Failed to send error answer to callback query: {}", answerEx.getMessage());
-            // }
-            // }
         }
     }
+
+
     @RabbitListener(queues = AUDIO_MESSAGE_UPDATE)
     public void consumeAudioFileMessageUpdate(@Payload Update update) {
         log.debug("NODE: Audio File Message Update is received from queue {}", AUDIO_MESSAGE_UPDATE);

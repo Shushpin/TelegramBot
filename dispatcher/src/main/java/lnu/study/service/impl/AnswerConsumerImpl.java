@@ -11,13 +11,13 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Service;
-import org.telegram.telegrambots.meta.api.methods.send.SendAudio;   // Потрібен цей імпорт
+import org.telegram.telegrambots.meta.api.methods.send.SendAudio;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
-import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery; // Додай імпорт
-import static lnu.study.model.RabbitQueue.ANSWER_CALLBACK_QUEUE; // Додай імпорт
+import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
+import static lnu.study.model.RabbitQueue.ANSWER_CALLBACK_QUEUE;
 
 
 import java.io.ByteArrayInputStream;
@@ -70,7 +70,7 @@ public class AnswerConsumerImpl implements AnswerConsumer {
                 if (photoDTO.getCaption() != null && !photoDTO.getCaption().isEmpty()) {
                     sendPhoto.setCaption(photoDTO.getCaption());
                 }
-                updateProcessor.setView(sendPhoto); // ВИПРАВЛЕНО: викликаємо setView(SendPhoto)
+                updateProcessor.setView(sendPhoto);
             } else if (typeId.equals(DocumentToSendDTO.class.getName())) {
                 DocumentToSendDTO documentDTO = objectMapper.readValue(body, DocumentToSendDTO.class);
                 log.debug("Deserialized DocumentToSendDTO: {}", documentDTO.getFileName());
@@ -81,8 +81,8 @@ public class AnswerConsumerImpl implements AnswerConsumer {
                 if (documentDTO.getCaption() != null && !documentDTO.getCaption().isEmpty()) {
                     sendDocument.setCaption(documentDTO.getCaption());
                 }
-                updateProcessor.setView(sendDocument); // ВИПРАВЛЕНО: викликаємо setView(SendDocument)
-            } else if (typeId.equals(AudioToSendDTO.class.getName())) { // <<< НОВИЙ БЛОК, ВИПРАВЛЕНИЙ
+                updateProcessor.setView(sendDocument);
+            } else if (typeId.equals(AudioToSendDTO.class.getName())) {
                 AudioToSendDTO audioDTO = objectMapper.readValue(body, AudioToSendDTO.class);
                 log.debug("Deserialized AudioToSendDTO: {}", audioDTO.getFileName());
 
@@ -92,14 +92,10 @@ public class AnswerConsumerImpl implements AnswerConsumer {
                 if (audioDTO.getCaption() != null && !audioDTO.getCaption().isEmpty()) {
                     sendAudio.setCaption(audioDTO.getCaption());
                 }
-                // Тут можна додати інші параметри для SendAudio, якщо вони є в DTO (duration, performer, title)
-                // sendAudio.setDuration(audioDTO.getDuration());
-                // sendAudio.setPerformer(audioDTO.getPerformer());
-                // sendAudio.setTitle(audioDTO.getTitle());
 
-                updateProcessor.setView(sendAudio); // ВИПРАВЛЕНО: викликаємо setView(SendAudio)
+                updateProcessor.setView(sendAudio);
             }
-            else if (typeId.equals(VideoToSendDTO.class.getName())) { // <<< НОВИЙ БЛОК
+            else if (typeId.equals(VideoToSendDTO.class.getName())) {
                 VideoToSendDTO videoDTO = objectMapper.readValue(body, VideoToSendDTO.class);
                 log.debug("Successfully deserialized to VideoToSendDTO. Filename: {}", videoDTO.getFileName());
                 updateProcessor.sendVideo(videoDTO);

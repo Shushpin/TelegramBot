@@ -19,7 +19,6 @@ public class UserActivationServiceImpl implements UserActivationService {
     @Override
     public boolean activation(String cryptoUserId) {
         var userId = cryptoTool.idOf(cryptoUserId);
-        // ---> ВАЖЛИВА ЗМІНА: Додаємо перевірку на null перед викликом DAO <---
         if (userId == null) {
             log.warn("Invalid cryptoUserId '{}' resulted in null userId. Activation failed.", cryptoUserId);
             return false; // Явно повертаємо false, якщо ID не розшифрувався

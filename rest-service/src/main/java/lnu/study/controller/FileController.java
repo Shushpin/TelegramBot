@@ -145,11 +145,6 @@ public class FileController {
         String encodedFileName = UriUtils.encode(fileName, StandardCharsets.UTF_8);
         response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodedFileName);
 
-        // Для відео можна також додати заголовок Accept-Ranges для підтримки часткового завантаження (пауза, перемотка)
-        // response.setHeader("Accept-Ranges", "bytes");
-        // Обробка Range запитів - це окрема, складніша задача для потокового відео.
-        // Для простого завантаження це не обов'язково.
-
         response.setStatus(HttpServletResponse.SC_OK);
 
         var binaryContent = video.getBinaryContent();

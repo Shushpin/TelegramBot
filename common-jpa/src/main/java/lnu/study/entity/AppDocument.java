@@ -29,8 +29,6 @@ public class AppDocument {
 
     @ManyToOne // Зв'язок "багато документів до одного користувача"
     @JoinColumn(name = "app_user_id") // Назва стовпця в таблиці app_document для зовнішнього ключа
-    private AppUser appUser; // <--- ДОДАНО ПОЛЕ ДЛЯ ВЛАСНИКА
+    private AppUser appUser;
 
-    // Метод orElse(Object o) я прибрав, оскільки він не стандартний.
-    // Якщо він тобі потрібен для чогось іншого, можеш повернути.
 }

@@ -28,8 +28,4 @@ public class AppVideo {
     private Integer height;       // Висота
     private String fileName;       // Ім'я файлу (може бути відсутнім, тоді генеруємо)
 
-    // Можна додати зв'язок з AppUser
-    // @ManyToOne
-    // @JoinColumn(name = "app_user_id")
-    // private AppUser appUser;
 }

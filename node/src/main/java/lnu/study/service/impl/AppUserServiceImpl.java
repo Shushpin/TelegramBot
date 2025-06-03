@@ -48,9 +48,7 @@ public class AppUserServiceImpl implements AppUserService {
             return "Ви вже зареєстровані та активні!";
         }
 
-        // Якщо користувач вже має email і знаходиться в стані очікування активації,
-        // можливо, варто нагадати йому перевірити пошту або запропонувати повторно відправити лист.
-        // Ця логіка залишилася незмінною.
+
         if (appUser.getEmail() != null && UserState.WAIT_FOR_EMAIL_STATE.equals(appUser.getState())) {
             log.warn("User with TelegramID {} has email {} and is already in WAIT_FOR_EMAIL_STATE. Resending activation email.",
                     appUser.getTelegramUserId(), appUser.getEmail());
@@ -177,11 +175,11 @@ public class AppUserServiceImpl implements AppUserService {
                 .build();
         var request = new HttpEntity<>(mailParams, headers);
 
-        String targetUri = mailServiceUri + "/mail/send"; // <<<=== ЗМІНА ТУТ: Додаємо повний шлях
+        String targetUri = mailServiceUri + "/mail/send";
 
         log.info("Sending activation email to {} with cryptoUserId {}. URI: {}", email, cryptoUserId, targetUri);
         try {
-            return restTemplate.exchange(targetUri, // <<<=== ЗМІНА ТУТ: Використовуємо повний шлях
+            return restTemplate.exchange(targetUri,
                     HttpMethod.POST,
                     request,
                     String.class);
@@ -238,8 +236,6 @@ public class AppUserServiceImpl implements AppUserService {
             log.warn("User not found for activation with cryptoUserId (decoded ID: {}): {}", userId, cryptoUserId);
         }
     }
-    // ProjectTelegramBot/node/src/main/java/lnu/study/service/impl/AppUserServiceImpl.java
-// ... (після інших методів) ...
 
     @Override
     @Transactional(readOnly = true) // Ця операція не змінює стан користувача, лише читає дані і відправляє email

@@ -11,5 +11,5 @@ public class DocumentToSendDTO {
     private String chatId;
     private byte[] documentBytes;
     private String fileName;
-    private String caption; // Опціонально
+    private String caption;
 }

@@ -1,17 +1,13 @@
-package lnu.study.dto; // Пакет в common-utils
+package lnu.study.dto;
 
-import java.io.Serializable; // DTO часто роблять Serializable
+import java.io.Serializable;
 
 public class ArchiveFileDetailDTO implements Serializable {
-    private static final long serialVersionUID = 1L; // Рекомендовано для Serializable класів
+    private static final long serialVersionUID = 1L;
 
     private String telegramFileId;
     private String originalFileName;
     private String telegramFileType; // "document", "photo", "video", "audio"
-
-    // Конструктор за замовчуванням (для деяких фреймворків/бібліотек)
-    public ArchiveFileDetailDTO() {
-    }
 
     public ArchiveFileDetailDTO(String telegramFileId, String originalFileName, String telegramFileType) {
         this.telegramFileId = telegramFileId;

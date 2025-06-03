@@ -1,6 +1,5 @@
 package lnu.study.controller;
 
-import lnu.study.dto.AudioToSendDTO;
 import lnu.study.dto.VideoToSendDTO;
 import lnu.study.service.UpdateProducer;
 import lnu.study.utils.MessageUtils;
@@ -42,9 +41,8 @@ public class UpdateProcessor {
         }
         if (update.hasMessage()) {
             distributeMessagesByType(update);
-        } else if (update.hasCallbackQuery()) { // <--- ОСЬ ЦЕЙ БЛОК ЗМІНЮЄМО
+        } else if (update.hasCallbackQuery()) {
             log.info("Dispatcher: CallbackQuery received: {} from chat_id: {}", update.getCallbackQuery().getData(), update.getCallbackQuery().getMessage().getChatId());
-            // Замість setUnsupportedMessageTypeView(update); або просто логування:
             updateProducer.produce(CALLBACK_QUERY_UPDATE, update); // Надсилаємо в нову чергу
         } else {
             log.error("Unsupported update type or message is null: " + update);
@@ -65,7 +63,7 @@ public class UpdateProcessor {
             processTextMessage(update);
         } else if (message.hasVoice()) {
             processVoiceMessage(update);
-        }else if (message.hasAudio()) { // <--- НОВА ГІЛКА
+        }else if (message.hasAudio()) {
             log.info("Processing audio file message from chat_id: {}", message.getChat().getId());
             processAudioFileMessage(update);
         } else {
@@ -138,8 +136,7 @@ public class UpdateProcessor {
             log.info("UpdateProcessor: SendAudio passed to TelegramBot for chat_id: {}", sendAudio.getChatId());
         } else {
             log.error("UpdateProcessor: CRITICAL - TelegramBot instance is NULL. Cannot send SendAudio to chat_id: {}", sendAudio.getChatId());
-            // Можливо, варто кидати виняток, якщо telegramBot є null, щоб швидше виявити проблему
-            // throw new IllegalStateException("TelegramBot instance is null in UpdateProcessor. Cannot send SendAudio.");
+
         }
     }
     public void sendVideo(VideoToSendDTO dto) {

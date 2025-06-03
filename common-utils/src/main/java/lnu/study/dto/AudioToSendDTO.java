@@ -14,9 +14,5 @@ public class AudioToSendDTO {
     private byte[] audioBytes;
     private String fileName;
     private String caption; // Опціонально, наприклад, "Сконвертовано: original_name.mp3"
-    // Telegram SendAudio також підтримує:
-    // private Integer duration;
-    // private String performer;
-    // private String title;
-    // Поки що залишимо простий варіант.
+
 }

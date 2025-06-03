@@ -1,14 +1,13 @@
 package lnu.study.configuration;
 
-import com.fasterxml.jackson.databind.DeserializationFeature; // <<< ДОДАЙ ЦЕЙ ІМПОРТ
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.amqp.core.Queue; // Переконайся, що цей імпорт є
-import static lnu.study.model.RabbitQueue.ANSWER_CALLBACK_QUEUE; // Додай цей імпорт
+import static lnu.study.model.RabbitQueue.ANSWER_CALLBACK_QUEUE;
 
 
 import static lnu.study.model.RabbitQueue.*;
@@ -25,9 +24,7 @@ public class RabbitConfiguration {
     @Bean
     public ObjectMapper objectMapper() {
         ObjectMapper objectMapper = new ObjectMapper();
-        // <<< --- ДОДАЙ ЦЕЙ РЯДОК --- >>>
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        // <<< ---------------------- >>>
         return objectMapper;
     }
 
@@ -45,14 +42,17 @@ public class RabbitConfiguration {
     public Queue photoMessageQueue() {
         return new Queue(PHOTO_MESSAGE_UPDATE);
     }
+
     @Bean
     public Queue answerMessageQueue() {
         return new Queue(ANSWER_MESSAGE);
     }
+
     @Bean
     public Queue voiceMessageQueue() {
         return new Queue(VOICE_MESSAGE_UPDATE);
     }
+
     @Bean
     public Queue answerCallbackQueueListener() { // Назва методу може бути іншою, головне - назва черги
         return new Queue(ANSWER_CALLBACK_QUEUE);

@@ -1,6 +1,5 @@
 package lnu.study.configuration;
 
-// Додайте імпорт Queue
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -8,10 +7,9 @@ import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import static lnu.study.model.RabbitQueue.ANSWER_CALLBACK_QUEUE; // Додай цей імпорт
+import static lnu.study.model.RabbitQueue.ANSWER_CALLBACK_QUEUE;
 
 
-// Переконайтесь, що константи імпортуються правильно
 import static lnu.study.model.RabbitQueue.*;
 
 @Configuration
@@ -21,7 +19,6 @@ public class RabbitConfiguration {
         return new Jackson2JsonMessageConverter();
     }
 
-    // Додайте біни для черг, які слухає node
     @Bean
     public Queue textMessageQueue() {
         return new Queue(TEXT_MESSAGE_UPDATE);
@@ -37,25 +34,28 @@ public class RabbitConfiguration {
         return new Queue(PHOTO_MESSAGE_UPDATE);
     }
 
-    // Додайте бін для черги, в яку node надсилає відповідь
     @Bean
     public Queue answerMessageQueue() {
         return new Queue(ANSWER_MESSAGE);
     }
+
     @Bean
     public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory, MessageConverter messageConverter) {
         RabbitTemplate rabbitTemplate = new RabbitTemplate(connectionFactory);
-        rabbitTemplate.setMessageConverter(messageConverter); // <<< Встановлюємо конвертер
+        rabbitTemplate.setMessageConverter(messageConverter);
         return rabbitTemplate;
     }
+
     @Bean
     public Queue voiceMessageQueue() {
         return new Queue(VOICE_MESSAGE_UPDATE);
     }
+
     @Bean
     public Queue answerCallbackQueue() {
         return new Queue(ANSWER_CALLBACK_QUEUE);
     }
+
     @Bean
     public Queue audioMessageUpdateQueueListener() {
         return new Queue(AUDIO_MESSAGE_UPDATE);
