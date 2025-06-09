@@ -345,7 +345,7 @@ public class FileServiceImpl implements FileService {
     @Override
     public String generateLink(Long fileId, LinkType linkType) {
         var hash = cryptoTool.hashOf(fileId);
-        return "http://" + linkAddress + "/" +linkType+ "?id=" + hash;
+        return linkAddress + "/" +linkType+ "?id=" + hash;
     }
     @Override
     public byte[] downloadFileAsByteArray(String fileId) {
