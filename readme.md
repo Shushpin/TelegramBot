@@ -1,8 +1,5 @@
 # ProjectTelegramBot
 ***
-div align="center">
-  <img src="https://raw.githubusercontent.com/Shushpin/TelegramBot/main/docs/image%20(4).png" alt="ContentTGD_Logo" width="500"/>
-</div>
 <p align="center">
   <img src="https://img.shields.io/badge/Java-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java">
   <img src="https://img.shields.io/badge/Spring-6DB33F?style=for-the-badge&logo=spring&logoColor=white" alt="Spring">
